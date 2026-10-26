@@ -14,7 +14,7 @@
 - Clean-room: no Image-Line code, samples or artwork; behavior comes from the public 3x Osc manual only.
 - Commits are plain prose with **no** `Co-Authored-By` or AI attribution lines (Ari's global rule).
 - Run commands from the repo root in PowerShell. `pwsh -NoProfile -File tools/mk.ps1 <target>` runs make in MSYS2 against the Rack SDK; its exit code is make's.
-- The core code and tests below were compiled and run green (46 checks) and the plugin DLL was built against the SDK before this plan was written. If a check fails for you, the file differs from the plan: diff it first.
+- The core code and tests below were compiled and run green (47 checks) and the plugin DLL was built against the SDK before this plan was written. If a check fails for you, the file differs from the plan: diff it first.
 
 ## Spec changes found while planning (applied in Task 1)
 
