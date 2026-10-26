@@ -20,7 +20,7 @@ Per oscillator (x3):
 - Mix level (osc 1 has none; osc 2/3 relative; summed level kept constant)
 
 Global (from 3x Osc):
-- AM OSC3 switch: osc 3 amplitude-modulates osc 1 + osc 2
+- AM OSC3 switch: osc 3 amplitude-modulates osc 1 + osc 2 (gain = 0.5 x (1 + osc 3); osc 3 is not heard, its pan and mix are unused)
 - HQ switch: polyBLEP anti-aliasing on/off
 
 Added (not in 3x Osc, where FL does it on the channel):
@@ -29,7 +29,7 @@ Added (not in 3x Osc, where FL does it on the channel):
 - Filter ADSR (separate)
 
 Ports: V/OCT (poly in), gate (poly in), cutoff CV, L/R audio out (poly).
-Context menu: load custom wave (single-cycle WAV), stereo/phase options. Panel stays simple.
+Context menu: load / clear custom wave (single-cycle WAV). Panel stays simple.
 UI: My lil house style (lime title band, role-colored jack rings, house-color lights, Rogan knobs, talking-face mascot driven by output level).
 
 ## Voice (x16, one per poly channel)
@@ -42,10 +42,10 @@ V/OCT + gate
   -> x ampADSR -> L/R out
 ```
 
-- Phase offset: each osc has two accumulators (L at 0, R at offset).
+- Phase offset: each osc has one accumulator; L reads it, R reads it plus the offset.
 - Noise: per-voice xorshift, unpitched.
 - Custom wave: 2048-sample table, linear interpolation; missing/invalid file falls back to sine.
-- ADSR: exponential-ish segments; retrigger starts from the current level (no click); gate low = release; voice idle when amp env finishes, so CPU follows held notes.
+- ADSR: linear segments (Adsr.h reused from My lil Drums); retrigger starts from the current level (no click); gate low = release; voice idle when amp env finishes, so CPU follows held notes.
 - SVF: TPT state-variable; cutoff clamped below Nyquist; resonance capped for stability.
 - Poly channels = max(channels of V/OCT, gate); output channels the same.
 - State: knobs are normal params; custom wave path stored in module JSON.

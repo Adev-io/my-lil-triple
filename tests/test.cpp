@@ -1,0 +1,11 @@
+// test.cpp: checks the core with plain asserts. Run: make test
+// Author: Ari Klopfer / A_Development. MIT
+#include "check.h"
+#include "test_adsr.h"
+
+int main()
+{
+    testAdsr();
+    std::printf ("%s: %d failure(s)\n", failures ? "FAILED" : "passed", failures);
+    return failures ? 1 : 0;
+}

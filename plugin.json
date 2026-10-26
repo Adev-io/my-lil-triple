@@ -1,0 +1,18 @@
+{
+  "slug": "MyLilTriple",
+  "name": "My lil Triple",
+  "version": "2.0.0",
+  "license": "MIT",
+  "brand": "A_Development",
+  "author": "Ari Klopfer",
+  "authorEmail": "arik@adevelopment.dev",
+  "authorUrl": "https://adevelopment.dev",
+  "pluginUrl": "https://github.com/Adev-io/my-lil-triple",
+  "manualUrl": "https://github.com/Adev-io/my-lil-triple#readme",
+  "sourceUrl": "https://github.com/Adev-io/my-lil-triple",
+  "donateUrl": "",
+  "changelogUrl": "https://github.com/Adev-io/my-lil-triple/releases",
+  "modules": [
+    { "slug": "Triple", "name": "Triple", "description": "Polyphonic three-oscillator synth voice: seven waves per osc, AM, HQ, amp ADSR, filter with its own ADSR", "tags": ["Oscillator", "Synth voice", "Polyphonic"] }
+  ]
+}
