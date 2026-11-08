@@ -50,7 +50,7 @@ def text(s, x, y, size, fill, anchor='middle', stroke=0.0):
     return '<path fill="%s"%s d="%s"/>' % (fill, bold, ' '.join(d))
 
 
-TITLE, TITLE_X, TITLE_Y, TITLE_SIZE = 'TRIPLE', 11.2, 6.3, 4.3
+TITLE, TITLE_X, TITLE_Y, TITLE_SIZE = 'MY LIL TRIPLE', 11.2, 6.3, 4.3
 MASCOT_X = W - 14.46
 MASCOT_R = BAND * 0.36
 
@@ -137,7 +137,6 @@ def panel():
         '<rect width="%g" height="%g" fill="%s"/>' % (W, H, INK),
         '<rect width="%g" height="%g" fill="%s"/>' % (W, BAND, LIME),
         text(TITLE, TITLE_X, TITLE_Y, TITLE_SIZE, INK, 'start', 0.39), mascot(MASCOT_X, BAND / 2, MASCOT_R),
-        text('my lil triple', W / 2, 12.6, 2.4, WHITE, stroke=0.12),
         '<rect x="2.5" y="94" width="%g" height="32" rx="2" fill="%s"/>' % (W - 5, INK2),
     ]
     for cap, x, y in CAPTIONS:

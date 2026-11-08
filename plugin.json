@@ -13,6 +13,6 @@
   "donateUrl": "",
   "changelogUrl": "https://github.com/Adev-io/my-lil-triple/releases",
   "modules": [
-    { "slug": "Triple", "name": "Triple", "description": "Polyphonic three-oscillator synth voice: seven waves per osc, AM, HQ, amp ADSR, filter with its own ADSR", "tags": ["Oscillator", "Synth voice", "Polyphonic"] }
+    { "slug": "Triple", "name": "My lil Triple", "description": "Polyphonic three-oscillator synth voice: seven waves per osc, AM, HQ, amp ADSR, filter with its own ADSR", "tags": ["Oscillator", "Synth voice", "Polyphonic"] }
   ]
 }
