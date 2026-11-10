@@ -3,7 +3,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
+#include <locale>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -50,6 +50,7 @@ static const int SNAP_N = 9, SNAP_DEFAULT = 3;
 inline std::string toText (const Pattern& p)
 {
     std::ostringstream s;
+    s.imbue (std::locale::classic());
     s.precision (9);   // floats round-trip exactly
     s << "bars=" << p.bars << "\n";
     for (const Note& n : p.notes) s << n.start << ' ' << n.len << ' ' << n.pitch << ' ' << n.vel << "\n";
@@ -61,15 +62,24 @@ inline bool fromText (const std::string& t, Pattern& p)
 {
     p = Pattern();
     std::istringstream s (t);
+    s.imbue (std::locale::classic());
     std::string line;
+    if (! std::getline (s, line) || line.compare (0, 5, "bars=") != 0) return false;
     int bars = 0;
-    if (! std::getline (s, line) || std::sscanf (line.c_str(), "bars=%d", &bars) != 1 || bars < 1 || bars > 16) return false;
+    {
+        std::istringstream hs (line.substr (5));
+        hs.imbue (std::locale::classic());
+        std::string extra;
+        if (! (hs >> bars) || (hs >> extra) || bars < 1 || bars > 16) return false;
+    }
     p.bars = bars;
     while (std::getline (s, line))
     {
         Note n;
-        char extra;
-        if (std::sscanf (line.c_str(), "%d %d %d %f %c", &n.start, &n.len, &n.pitch, &n.vel, &extra) != 4) continue;
+        std::istringstream ls (line);
+        ls.imbue (std::locale::classic());
+        std::string extra;
+        if (! (ls >> n.start >> n.len >> n.pitch >> n.vel) || (ls >> extra)) continue;   // overflow sets failbit, so huge numbers are skipped
         if (n.start < 0 || n.start >= p.ticks() || n.len < 1 || n.pitch < 0 || n.pitch > 127 || ! (n.vel >= 0.f && n.vel <= 1.f)) continue;
         p.add (n);
     }

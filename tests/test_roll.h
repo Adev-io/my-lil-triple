@@ -18,8 +18,11 @@ inline void testRollData()
         Pattern g;
         check (! fromText ("{garbage", g) && g.notes.empty() && g.bars == 4, "garbage loads as an empty 4-bar roll");
         Pattern h;
-        fromText ("bars=2\n0 96 60 0.5\nnope\n-5 96 60 0.5\n10 0 60 0.5\n20 96 200 0.5\n30 96 61 0.5 extra\n800 96 61 0.5\n", h);
+        fromText ("bars=2\n0 96 60 0.5\nnope\n-5 96 60 0.5\n10 0 60 0.5\n20 96 200 0.5\n30 96 61 0.5 extra\n800 96 61 0.5\n99999999999999 96 62 0.5\n", h);
         check (h.notes.size() == 1 && h.notes[0].pitch == 60, "bad note lines are skipped", (double) h.notes.size());
+        Pattern cr;
+        fromText ("bars=1\r\n0 96 60 0.5\r\n", cr);
+        check (cr.bars == 1 && cr.notes.size() == 1, "CRLF text (Windows clipboard) still loads", (double) cr.notes.size());
     }
     // add(): same start + pitch replaces; the cap refuses
     {
