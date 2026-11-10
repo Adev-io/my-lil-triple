@@ -158,7 +158,7 @@ struct Player
 {
     const Pattern* pat = nullptr;
     Chan ch[MAX_CH];
-    int chans = 1;          // output channel count: the highest channel used, until reset
+    int chans = 1;          // output channel count: the highest channel used. Only grows until reset, on purpose (no poly channel-count flapping downstream)
     long last = -1;         // the tick evaluated last (absolute, since reset)
     bool resync = true;     // next evaluation starts every note that covers the playhead
     long ages = 0;
@@ -195,6 +195,7 @@ struct Player
             for (int i = 0; i < (int) pat->notes.size(); ++i)
             {
                 const Note& n = pat->notes[i];
+                if (n.pitch < 0 || n.pitch > 127) continue;   // Pattern::add does not validate; best[] is 128 wide
                 if (n.start <= lt && lt < std::min (n.start + n.len, L) && (best[n.pitch] < 0 || pat->notes[best[n.pitch]].start < n.start))
                     best[n.pitch] = i;
             }
@@ -217,12 +218,13 @@ struct Player
             bool held = false;
             for (const Chan& c : ch) held = held || c.key == k;
             if (held) continue;
-            const bool fresh = all || (sameLoop ? (n.start > plt && n.start <= lt) : (n.start > plt || n.start <= lt));
-            if (! fresh) continue;   // started earlier and lost its channel to a steal: stays silent
+            const bool started = sameLoop ? (n.start > plt && n.start <= lt) : (n.start > plt || n.start <= lt);   // began since the last tick
+            if (! all && ! started) continue;   // started earlier and lost its channel to a steal: stays silent
             int c = 0;
             while (c < MAX_CH && ch[c].key >= 0) ++c;
             if (c == MAX_CH)
             {
+                if (! started) continue;   // a resync only fills free channels; it never steals a sounding voice
                 c = 0;
                 for (int i = 1; i < MAX_CH; ++i) if (ch[i].age < ch[c].age) c = i;
             }

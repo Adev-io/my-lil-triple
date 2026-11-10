@@ -191,4 +191,40 @@ inline void testRollPlayer()
         for (int i = 1000; i < 1100; ++i) { pl.process (i / 100.0, gap); held = held && pl.gateOut (0); }
         check (held, "editing while playing does not retrigger held notes");
     }
+    // an edit in a dense passage must not steal sounding voices (20 covering notes, 16 channels)
+    {
+        Pattern p;
+        for (int k = 0; k < 20; ++k) p.add (Note (0, BAR, 40 + k, 0.8f));
+        Player pl;
+        pl.setPattern (&p);
+        for (int i = 0; i < 100; ++i) pl.process (i / 100.0, gap);
+        int pitch[MAX_CH];
+        bool gate[MAX_CH];
+        for (int c = 0; c < MAX_CH; ++c) { pitch[c] = pl.ch[c].pitch; gate[c] = pl.gateOut (c); }
+        Pattern q = p;
+        q.add (Note (2 * BAR, 24, 100, 0.8f));
+        pl.setPattern (&q);
+        bool same = true;
+        int on = 0;
+        for (int i = 100; i < 400; ++i)
+        {
+            pl.process (i / 100.0, gap);
+            on = 0;
+            for (int c = 0; c < MAX_CH; ++c)
+            {
+                same = same && pl.gateOut (c) == gate[c] && pl.ch[c].pitch == pitch[c];
+                on += pl.gateOut (c) ? 1 : 0;
+            }
+        }
+        check (same && on == 16, "editing a dense passage keeps all 16 sounding voices", on);
+    }
+    // pitch 72 is +1 V
+    {
+        Pattern p;
+        p.add (Note (0, PPQ, 72, 0.8f));
+        Player pl;
+        pl.setPattern (&p);
+        pl.process (0.0, gap);
+        check (pl.gateOut (0) && near (pl.voct (0), 1.0), "pitch 72 is +1 V", pl.voct (0));
+    }
 }
