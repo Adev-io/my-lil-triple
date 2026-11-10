@@ -168,6 +168,7 @@ struct Player
     static int key (const Note& n) { return n.start * 128 + n.pitch; }
     void setPattern (const Pattern* p) { pat = p; resync = true; }
     // Switch pattern with its tick 0 at atTick (the loop end of the old one). The next evaluation starts every covering note.
+    // Precondition: atTick <= the next evaluated tick (the loop position is never negative).
     void switchTo (const Pattern* p, long atTick) { pat = p; origin = atTick; resync = true; }
     void releaseAll() { for (Chan& c : ch) { c.key = -1; c.gate = false; c.gap = 0; } }
     void reset() { releaseAll(); last = -1; resync = true; chans = 1; origin = 0; }
@@ -316,6 +317,7 @@ struct LiveArp
                         break;
                     }
                     default:   // LIVE_RANDOM: xorshift32
+                        counter = 0;   // unused here; kept at 0 so it can't overflow on a long-held chord
                         rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
                         k = (int) (rng % (uint32_t) n);
                         break;

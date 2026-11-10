@@ -42,12 +42,13 @@ struct RollWidget : ModuleWidget
 
         struct Spec { std::function<std::string()> text; std::function<void()> click; std::function<void (Menu*)> list; };
         auto doc = [=] () -> RollDoc& { return e->m->doc; };
-        auto setBars = [=] (int b) { doc().pat.bars = b; e->commit(); };
+        auto setBars = [=] (int b) { e->pat().bars = b; e->commit(); };
+        auto setSnap = [=] (int i) { doc().snap = i; e->m->publishSnap(); };   // the live arp steps on it
         std::vector<Spec> cells = {
             { [=] { return tools[e->tool]; }, [=] { e->tool = (e->tool + 1) % RollEditor::TOOL_N; },
               [=] (Menu* m) { pick (m, tools, [=] { return e->tool; }, [=] (int i) { e->tool = i; }); } },
-            { [=] { return "SNAP " + snapNames[doc().snap]; }, [=] { doc().snap = (doc().snap + 1) % SNAP_N; },
-              [=] (Menu* m) { pick (m, snapNames, [=] { return doc().snap; }, [=] (int i) { doc().snap = i; }); } },
+            { [=] { return "SNAP " + snapNames[doc().snap]; }, [=] { setSnap ((doc().snap + 1) % SNAP_N); },
+              [=] (Menu* m) { pick (m, snapNames, [=] { return doc().snap; }, [=] (int i) { setSnap (i); }); } },
             { [=] { return "KEY " + keys[doc().key]; }, [=] { doc().key = (doc().key + 1) % 12; },
               [=] (Menu* m) { pick (m, keys, [=] { return doc().key; }, [=] (int i) { doc().key = i; }); } },
             { [=] { return modes[doc().mode]; }, [=] { doc().mode = (doc().mode + 1) % 7; },
@@ -55,8 +56,11 @@ struct RollWidget : ModuleWidget
             { [=] { return std::string (doc().scaleSnap ? "SCALE SNAP" : "FREE"); }, [=] { doc().scaleSnap = ! doc().scaleSnap; }, nullptr },
             { [=] { return chordNames[doc().chord]; }, [=] { doc().chord = (doc().chord + 1) % CHORD_N; },
               [=] (Menu* m) { pick (m, chordNames, [=] { return doc().chord; }, [=] (int i) { doc().chord = i; }); } },
-            { [=] { return bars[doc().pat.bars - 1]; }, [=] { setBars (doc().pat.bars % 16 + 1); },
-              [=] (Menu* m) { pick (m, bars, [=] { return doc().pat.bars - 1; }, [=] (int i) { setBars (i + 1); }); } },
+            { [=] { return bars[e->pat().bars - 1]; }, [=] { setBars (e->pat().bars % 16 + 1); },
+              [=] (Menu* m) { pick (m, bars, [=] { return e->pat().bars - 1; }, [=] (int i) { setBars (i + 1); }); } },
+            { [=] {   // edited pattern, and the playing one when it differs
+                  const int p = e->m->playing.load();
+                  return p == e->cur ? string::f ("PAT %d", e->cur + 1) : string::f ("PAT %d >%d", e->cur + 1, p + 1); }, nullptr, nullptr },
             { [=] { return std::string ("TOOLS"); }, [=] { appendTools (createMenu(), e); },   // opens on left click too
               [=] (Menu* m) { appendTools (m, e); } },
         };
@@ -77,11 +81,14 @@ struct RollWidget : ModuleWidget
 
         auto at = [] (const float* mm) { return mm2px (Vec (mm[0], mm[1])); };
         addParam (createParamCentered<Rogan1PSWhite> (at (L::BPM_PARAM), module, Roll::BPM_PARAM));
+        addParam (createParamCentered<Rogan1PSWhite> (at (L::PAT_PARAM), module, Roll::PAT_PARAM));
+        addParam (createParamCentered<Rogan1PSWhite> (at (L::ARP_PARAM), module, Roll::ARP_PARAM));
         addParam (createParamCentered<VCVButton> (at (L::RST_PARAM), module, Roll::RST_PARAM));
         addParam (createLightParamCentered<VCVLightLatch<MediumSimpleLight<LimeLight>>> (at (L::RUN_PARAM), module, Roll::RUN_PARAM, Roll::RUN_LIGHT));
         addInput (createInputCentered<PJ301MPort> (at (L::CLK_INPUT), module, Roll::CLK_INPUT));
         addInput (createInputCentered<PJ301MPort> (at (L::RST_INPUT), module, Roll::RST_INPUT));
         addInput (createInputCentered<PJ301MPort> (at (L::RUN_INPUT), module, Roll::RUN_INPUT));
+        addInput (createInputCentered<PJ301MPort> (at (L::PAT_INPUT), module, Roll::PAT_INPUT));
         addOutput (createOutputCentered<PJ301MPort> (at (L::VOCT_OUTPUT), module, Roll::VOCT_OUTPUT));
         addOutput (createOutputCentered<PJ301MPort> (at (L::GATE_OUTPUT), module, Roll::GATE_OUTPUT));
         addOutput (createOutputCentered<PJ301MPort> (at (L::VEL_OUTPUT), module, Roll::VEL_OUTPUT));
@@ -100,12 +107,21 @@ struct RollWidget : ModuleWidget
         menu->addChild (createIndexSubmenuItem ("Clock pulses per quarter", { "1", "4 (16ths)", "24", "48" },
             [=] { const int q = m->ppq; return (size_t) (q == 1 ? 0 : q == 24 ? 2 : q == 48 ? 3 : 1); },
             [=] (size_t i) { static const int Q[4] = { 1, 4, 24, 48 }; m->ppq = Q[i]; }));
-        menu->addChild (createMenuItem ("Copy notes as text", "", [=] { glfwSetClipboardString (APP->window->win, toText (m->doc.pat).c_str()); }));
+        menu->addChild (createMenuItem ("Copy notes as text", "", [=] { glfwSetClipboardString (APP->window->win, toText (e->pat()).c_str()); }));
         menu->addChild (createMenuItem ("Clear notes", "", [=] {
-            const std::vector<Note> before = m->doc.pat.notes;
-            m->doc.pat.notes.clear();
+            e->syncSel();
+            const std::vector<Note> before = e->notes();
+            e->notes().clear();
             e->commit();
             e->record (before);
+        }));
+        menu->addChild (createSubmenuItem ("Copy this pattern to", "", [=] (Menu* sm) {
+            for (int j = 0; j < PATS; ++j)
+                sm->addChild (createMenuItem (string::f ("Pattern %d", j + 1), j == e->cur ? "this one" : "", [=] {
+                    if (j == e->cur) return;
+                    m->doc.pats[j] = e->pat();   // overwrites slot j; not on the roll undo (that belongs to the edited pattern)
+                    m->commit (j);
+                }, j == e->cur));
         }));
     }
 };

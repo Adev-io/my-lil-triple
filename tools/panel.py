@@ -100,6 +100,7 @@ RJ = 114.0
 ROLL = dict(name='roll', svg='Roll.svg', title='MY LIL ROLL', w=ROLL_W, captions=[], block=(106, 20), layout=[
     ('CLK_INPUT', 'seq', 14, RJ, 'CLK'), ('RST_INPUT', 'seq', 28, RJ, 'RST'), ('RUN_INPUT', 'seq', 42, RJ, 'RUN'),
     ('RST_PARAM', 'button', 55, RJ, 'RESET'), ('RUN_PARAM', 'button', 67, RJ, 'PLAY'), ('BPM_PARAM', 'knob', 83, RJ, 'BPM'),
+    ('PAT_PARAM', 'knob', 101, RJ, 'PAT'), ('ARP_PARAM', 'knob', 119, RJ, 'ARP'), ('PAT_INPUT', 'cv', 137, RJ, 'PAT CV'),
     ('VOCT_OUTPUT', 'out', 170, RJ, 'V/OCT'), ('GATE_OUTPUT', 'out', 186, RJ, 'GATE'),
     ('VEL_OUTPUT', 'out', 202, RJ, 'VEL'), ('EOC_OUTPUT', 'out', 218, RJ, 'EOC'),
 ], boxes=[('STRIP_BOX', 4.0, 10.2, ROLL_W - 8, 6.6), ('ROLL_BOX', 4.0, 17.6, ROLL_W - 8, 75.4), ('VEL_BOX', 4.0, 94.0, ROLL_W - 8, 10.0)])

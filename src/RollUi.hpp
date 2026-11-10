@@ -25,21 +25,29 @@ struct RollEditor
     int lastLen = PPQ;            // new notes take the length of the last one touched (FL)
     int seenGen = -1;             // Roll::docGen this editor state belongs to
     bool previewing = false;      // a TOOLS submenu is previewing on the notes: the grid takes no keys
+    int cur = 0;                  // the pattern shown and edited: follows Roll::selected
 
-    std::vector<Note>& notes() { return m->doc.pat.notes; }
+    Pattern& pat() { return m->doc.pats[cur]; }
+    std::vector<Note>& notes() { return pat().notes; }
 
+    // Follows a doc reload and the PAT knob/CV. The edited pattern never changes under a held mouse button or an
+    // open tool preview; it catches up on the next call after. The clipboard survives a pattern change (copy between patterns).
     void syncSel()
     {
         if (! m) return;
-        if (m->docGen != seenGen) { seenGen = m->docGen; hist = History(); clip.clear(); sel.assign (notes().size(), 0); }
+        const int want = m->selected.load();
+        const bool held = glfwGetMouseButton (APP->window->win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS
+            || glfwGetMouseButton (APP->window->win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+        if (m->docGen != seenGen) { seenGen = m->docGen; cur = want; hist = History(); clip.clear(); sel.assign (notes().size(), 0); }
+        else if (want != cur && ! previewing && ! held) { cur = want; hist = History(); sel.assign (notes().size(), 0); }
         sel.resize (notes().size(), 0);
     }
     bool anySel() const { for (char s : sel) if (s) return true; return false; }
     void selectNone() { std::fill (sel.begin(), sel.end(), 0); }
     int snap() const { return SNAPS[m->doc.snap].ticks; }
-    int loopTicks() const { return m->doc.pat.ticks(); }
+    int loopTicks() const { return m->doc.pats[cur].ticks(); }
     ToolCtx toolCtx() const { ToolCtx c; c.loopTicks = loopTicks(); c.snap = snap(); c.key = m->doc.key; c.mode = m->doc.mode; return c; }
-    void commit() { syncSel(); m->commit(); }
+    void commit() { sel.resize (notes().size(), 0); m->commit (cur); }   // never switches pattern mid-edit
     void record (const std::vector<Note>& before) { if (before != notes()) hist.push (before); }   // one undo step per real change
     void undo() { if (hist.back (notes())) { sel.assign (notes().size(), 0); commit(); } }
     void redo() { if (hist.forward (notes())) { sel.assign (notes().size(), 0); commit(); } }
@@ -116,7 +124,7 @@ struct RollGrid : OpaqueWidget
         if (root < 0 || root > 127 || start < 0 || start >= ed->loopTicks()) return;
         for (int pitch : stamp (root, d.chord, d.key, d.mode, d.scaleSnap))
         {
-            if (! d.pat.add (Note (start, ed->lastLen, pitch, 0.8f))) break;
+            if (! ed->pat().add (Note (start, ed->lastLen, pitch, 0.8f))) break;
             ed->syncSel();
             for (int i = 0; i < (int) ed->notes().size(); ++i)
                 if (ed->notes()[i].start == start && ed->notes()[i].pitch == pitch) grabbed.push_back (i);
@@ -247,7 +255,7 @@ struct RollGrid : OpaqueWidget
         for (Note c : ed->clip)
         {
             c.start += at;
-            if (c.start >= ed->loopTicks() || ! ed->m->doc.pat.add (c)) continue;
+            if (c.start >= ed->loopTicks() || ! ed->pat().add (c)) continue;
             ed->syncSel();
             for (int i = 0; i < (int) ed->notes().size(); ++i)
                 if (ed->notes()[i].start == c.start && ed->notes()[i].pitch == c.pitch) ed->sel[i] = 1;
@@ -323,7 +331,7 @@ struct RollGrid : OpaqueWidget
         NVGcontext* vg = args.vg;
         const float w = box.size.x, h = box.size.y;
         const RollDoc* d = ed->m ? &ed->m->doc : nullptr;
-        const int key = d ? d->key : 0, mode = d ? d->mode : 0, L = d ? d->pat.ticks() : 4 * BAR;
+        const int key = d ? d->key : 0, mode = d ? d->mode : 0, L = d ? ed->loopTicks() : 4 * BAR;
         const int s = d ? SNAPS[d->snap].ticks : 24;
         if (ed->m) clampView();
         nvgSave (vg);
@@ -358,9 +366,9 @@ struct RollGrid : OpaqueWidget
         }
 
         if (d)
-            for (int i = 0; i < (int) d->pat.notes.size(); ++i)
+            for (int i = 0; i < (int) ed->notes().size(); ++i)
             {
-                const Note& n = d->pat.notes[i];
+                const Note& n = ed->notes()[i];
                 const float x0 = xOf (n.start), x1 = xOf (n.start + n.len), y = yOf (n.pitch);
                 if (x1 < ROLL_KEYW || x0 > w || y + ed->rowH < 0 || y > h) continue;
                 const bool on = i < (int) ed->sel.size() && ed->sel[i];
