@@ -39,8 +39,8 @@ struct TripleVoice
 
     bool active() const { return amp.active(); }
 
-    // voct = volts, 0 = C4. cutCv = octaves added to the cutoff. l, r are about +-1 before the module's 5 V scale.
-    void process (const TripleCfg& c, float voct, bool gate, float cutCv, float sr, float& l, float& r)
+    // voct = volts, 0 = C4. cutCv = octaves added to the cutoff. vel 0..1 scales the output. l, r are about +-1 before the module's 5 V scale.
+    void process (const TripleCfg& c, float voct, bool gate, float cutCv, float sr, float& l, float& r, float vel = 1.f)
     {
         amp.a = c.ampA; amp.d = c.ampD; amp.s = c.ampS; amp.r = c.ampR;   // before gate(): the release rate reads r
         flt.a = c.fltA; flt.d = c.fltD; flt.s = c.fltS; flt.r = c.fltR;
@@ -93,7 +93,7 @@ struct TripleVoice
 
         const float fc = c.cutoff * std::exp2 (c.envAmt * 6.f * fe + c.keytrack * voct + cutCv);
         const SvfCoef k = svfCoef (fc, c.res, sr);
-        l = fl.process (sl, k, c.ftype) * a;
-        r = fr.process (sr2, k, c.ftype) * a;
+        l = fl.process (sl, k, c.ftype) * a * vel;
+        r = fr.process (sr2, k, c.ftype) * a * vel;
     }
 };
