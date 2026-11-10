@@ -42,16 +42,22 @@ struct RollEditor
     void redo() { if (hist.forward (notes())) { sel.assign (notes().size(), 0); commit(); } }
     void eraseIndex (int i) { notes().erase (notes().begin() + i); sel.erase (sel.begin() + i); }
 
-    // After a move: two notes on the same start + pitch keep only the one with the higher index (later index wins).
+    // After a move: notes on the same start + pitch keep one, a moved note if any (it replaces what it landed on, FL),
+    // the highest index among equals. moved[i] = note i was just moved; it may be sel itself, so it is read before compacting.
     // ponytail: O(n^2) over up to MAX_NOTES, but only on mouse-up and key presses
-    void dedupe()
+    void dedupe (const std::vector<char>& moved)
     {
         syncSel();
         std::vector<Note>& n = notes();
-        std::vector<char> dead (n.size(), 0);
+        std::vector<char> mv (n.size(), 0), dead (n.size(), 0);
+        for (int i = 0; i < (int) n.size() && i < (int) moved.size(); ++i) mv[i] = moved[i];
         for (int i = 0; i < (int) n.size(); ++i)
-            for (int j = i + 1; j < (int) n.size(); ++j)
-                if (n[j].start == n[i].start && n[j].pitch == n[i].pitch) { dead[i] = 1; break; }
+            for (int j = 0; j < (int) n.size(); ++j)
+                if (j != i && n[j].start == n[i].start && n[j].pitch == n[i].pitch && (mv[j] > mv[i] || (mv[j] == mv[i] && j > i)))
+                {
+                    dead[i] = 1;   // j beats i: moved over unmoved, else the higher index
+                    break;
+                }
         int k = 0;
         for (int i = 0; i < (int) n.size(); ++i)
             if (! dead[i]) { n[k] = n[i]; sel[k] = sel[i]; ++k; }
@@ -199,7 +205,13 @@ struct RollGrid : OpaqueWidget
             for (int i = 0; i < (int) n.size(); ++i)
                 if (n[i].pitch >= pa && n[i].pitch <= pb && n[i].start < tb && n[i].start + n[i].len > ta) ed->sel[i] = 1;
         }
-        if (drag == MOVE) { ed->dedupe(); ed->commit(); }
+        if (drag == MOVE)
+        {
+            std::vector<char> moved (ed->notes().size(), 0);
+            for (int i : grabbed) if (i >= 0 && i < (int) moved.size()) moved[i] = 1;
+            ed->dedupe (moved);
+            ed->commit();
+        }
         ed->record (undoBase);
         drag = NONE;
     }
@@ -259,12 +271,12 @@ struct RollGrid : OpaqueWidget
         else if ((mods == 0 || shift) && (e.key == GLFW_KEY_UP || e.key == GLFW_KEY_DOWN))
         {
             nudge (0, (e.key == GLFW_KEY_UP ? 1 : -1) * (shift ? 12 : 1));
-            ed->dedupe();
+            ed->dedupe (ed->sel);   // nudge moves the selection
         }
         else if (mods == 0 && (e.key == GLFW_KEY_LEFT || e.key == GLFW_KEY_RIGHT))
         {
             nudge ((e.key == GLFW_KEY_RIGHT ? 1 : -1) * ed->snap(), 0);
-            ed->dedupe();
+            ed->dedupe (ed->sel);   // nudge moves the selection
         }
         else return;   // not ours: Rack's own shortcuts still work
         e.consume (this);
