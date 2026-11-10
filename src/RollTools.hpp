@@ -49,6 +49,7 @@ inline void endToolSession (RollEditor* only = nullptr)
 struct RevertGuard : widget::Widget
 {
     std::shared_ptr<ToolSession> s;
+    RevertGuard() { box.size = Vec(); }   // Rack's default widget size is infinite, which made the whole submenu infinite
     ~RevertGuard() { s->cancel(); }
 };
 
