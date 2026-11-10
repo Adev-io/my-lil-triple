@@ -22,9 +22,16 @@ struct RollEditor
     History hist;
     std::vector<Note> clip;
     int lastLen = PPQ;            // new notes take the length of the last one touched (FL)
+    int seenGen = -1;             // Roll::docGen this editor state belongs to
 
     std::vector<Note>& notes() { return m->doc.pat.notes; }
-    void syncSel() { if (m) sel.resize (notes().size(), 0); }
+
+    void syncSel()
+    {
+        if (! m) return;
+        if (m->docGen != seenGen) { seenGen = m->docGen; hist = History(); clip.clear(); sel.assign (notes().size(), 0); }
+        sel.resize (notes().size(), 0);
+    }
     bool anySel() const { for (char s : sel) if (s) return true; return false; }
     void selectNone() { std::fill (sel.begin(), sel.end(), 0); }
     int snap() const { return SNAPS[m->doc.snap].ticks; }
@@ -34,6 +41,23 @@ struct RollEditor
     void undo() { if (hist.back (notes())) { sel.assign (notes().size(), 0); commit(); } }
     void redo() { if (hist.forward (notes())) { sel.assign (notes().size(), 0); commit(); } }
     void eraseIndex (int i) { notes().erase (notes().begin() + i); sel.erase (sel.begin() + i); }
+
+    // After a move: two notes on the same start + pitch keep only the one with the higher index (later index wins).
+    // ponytail: O(n^2) over up to MAX_NOTES, but only on mouse-up and key presses
+    void dedupe()
+    {
+        syncSel();
+        std::vector<Note>& n = notes();
+        std::vector<char> dead (n.size(), 0);
+        for (int i = 0; i < (int) n.size(); ++i)
+            for (int j = i + 1; j < (int) n.size(); ++j)
+                if (n[j].start == n[i].start && n[j].pitch == n[i].pitch) { dead[i] = 1; break; }
+        int k = 0;
+        for (int i = 0; i < (int) n.size(); ++i)
+            if (! dead[i]) { n[k] = n[i]; sel[k] = sel[i]; ++k; }
+        n.resize (k);
+        sel.resize (k);
+    }
 };
 
 struct RollGrid : OpaqueWidget
@@ -61,7 +85,11 @@ struct RollGrid : OpaqueWidget
             if (n[i].pitch == pi && t >= n[i].start && t < n[i].start + n[i].len) return i;
         return -1;
     }
-    bool nearEnd (int i, Vec p) { const Note& n = ed->notes()[i]; return xOf (n.start + n.len) - p.x < 5.f; }
+    bool nearEnd (int i, Vec p)   // the right edge resizes; capped at a third of the note so a short one can still be moved
+    {
+        const Note& n = ed->notes()[i];
+        return xOf (n.start + n.len) - p.x < std::min (5.f, (xOf (n.start + n.len) - xOf (n.start)) / 3.f);
+    }
 
     void grab (int i)   // the note, or the whole selection when the note is part of it
     {
@@ -171,6 +199,7 @@ struct RollGrid : OpaqueWidget
             for (int i = 0; i < (int) n.size(); ++i)
                 if (n[i].pitch >= pa && n[i].pitch <= pb && n[i].start < tb && n[i].start + n[i].len > ta) ed->sel[i] = 1;
         }
+        if (drag == MOVE) { ed->dedupe(); ed->commit(); }
         ed->record (undoBase);
         drag = NONE;
     }
@@ -228,9 +257,15 @@ struct RollGrid : OpaqueWidget
             for (int i = (int) n.size() - 1; i >= 0; --i) if (ed->sel[i]) ed->eraseIndex (i);
         }
         else if ((mods == 0 || shift) && (e.key == GLFW_KEY_UP || e.key == GLFW_KEY_DOWN))
+        {
             nudge (0, (e.key == GLFW_KEY_UP ? 1 : -1) * (shift ? 12 : 1));
+            ed->dedupe();
+        }
         else if (mods == 0 && (e.key == GLFW_KEY_LEFT || e.key == GLFW_KEY_RIGHT))
+        {
             nudge ((e.key == GLFW_KEY_RIGHT ? 1 : -1) * ed->snap(), 0);
+            ed->dedupe();
+        }
         else return;   // not ours: Rack's own shortcuts still work
         e.consume (this);
         ed->commit();
@@ -260,6 +295,7 @@ struct RollGrid : OpaqueWidget
     void drawLayer (const DrawArgs& args, int layer) override
     {
         if (layer != 1) return;
+        if (ed->m) ed->syncSel();   // picks up an Initialize or preset load without input
         NVGcontext* vg = args.vg;
         const float w = box.size.x, h = box.size.y;
         const RollDoc* d = ed->m ? &ed->m->doc : nullptr;
@@ -393,6 +429,7 @@ struct VelLane : OpaqueWidget
     void drawLayer (const DrawArgs& args, int layer) override
     {
         if (layer != 1) return;
+        if (ed->m) ed->syncSel();   // picks up an Initialize or preset load without input
         NVGcontext* vg = args.vg;
         const float w = box.size.x, h = box.size.y;
         nvgSave (vg);

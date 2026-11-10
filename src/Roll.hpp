@@ -23,6 +23,7 @@ struct Roll : Module
     enum LightId { RUN_LIGHT, LIGHTS_LEN };
 
     RollDoc doc;                                   // UI thread
+    int docGen = 0;                                // bumped when doc is replaced wholesale (UI thread)
     Pattern* pat = nullptr;                        // the audio thread owns this one
     std::atomic<Pattern*> incoming { nullptr };    // the UI thread hands a new one over here
     std::atomic<int> ppq { 4 };                    // clock pulses per quarter note
@@ -65,6 +66,7 @@ struct Roll : Module
     {
         doc = RollDoc();
         ppq = 4;
+        ++docGen;
         commit();
     }
 
@@ -171,6 +173,7 @@ struct Roll : Module
         doc.scaleSnap = b ? json_is_true (b) : true;
         const int q = num ("ppq", 1, 48, 4);
         ppq = (q == 1 || q == 4 || q == 24 || q == 48) ? q : 4;
+        ++docGen;
         commit();
     }
 };
