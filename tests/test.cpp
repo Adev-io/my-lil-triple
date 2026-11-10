@@ -17,6 +17,7 @@ int main()
     testRollClock();
     testRollPlayer();
     testToolsQuick();
+    testToolsShape();
     testOsc();
     testSvf();
     testVoice();

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 #include "Chords.h"
 #include "Roll.h"
@@ -126,21 +127,6 @@ inline void quickQuantize (std::vector<Note>& notes, std::vector<char>& sel, con
     replaceScope (notes, sel, idx, out, c);
 }
 
-inline void quickChop (std::vector<Note>& notes, std::vector<char>& sel, const ToolCtx& c)
-{
-    if (c.snap <= 1) return;
-    const std::vector<int> idx = scope (sel, (int) notes.size());
-    std::vector<Note> out;
-    for (int i : idx)
-    {
-        const Note& n = notes[i];
-        const int end = n.start + n.len;
-        for (int a = n.start; a < end && a < c.loopTicks; a += c.snap)
-            out.push_back (Note (a, std::min (c.snap, end - a), n.pitch, n.vel));   // the last piece keeps the remainder
-    }
-    replaceScope (notes, sel, idx, out, c);
-}
-
 inline void discardLengths (std::vector<Note>& notes, std::vector<char>& sel, const ToolCtx& c)
 {
     if (c.snap <= 1) return;
@@ -191,6 +177,163 @@ inline void rotate (std::vector<Note>& notes, std::vector<char>& sel, const Tool
     {
         Note n = notes[i];
         n.start = ((n.start + dir * c.snap) % c.loopTicks + c.loopTicks) % c.loopTicks;
+        out.push_back (n);
+    }
+    replaceScope (notes, sel, idx, out, c);
+}
+
+// ---- quantize, chop, articulate, flip ----
+
+enum { LEN_LEAVE, LEN_QUANT, END_LEAVE, END_QUANT };
+struct QuantizeP { int grid = 24; float start = 1.f, sens = 1.f; int lenMode = LEN_LEAVE; float len = 1.f; };
+
+// Start: nearest grid line, blended by strength; a start further than sens x half a step from its line is left alone.
+// Length: leave it, snap it, keep the end, or snap the end (blended by the length strength).
+inline void quantize (std::vector<Note>& notes, std::vector<char>& sel, const QuantizeP& p, const ToolCtx& c)
+{
+    if (p.grid <= 1) return;
+    const std::vector<int> idx = scope (sel, (int) notes.size());
+    std::vector<Note> out;
+    for (int i : idx)
+    {
+        Note n = notes[i];
+        const int os = n.start, oe = n.start + n.len;
+        const int qs = gridStart (os, p.grid, c.loopTicks);
+        int ns = os;
+        if (std::abs (os - qs) <= (double) p.sens * p.grid * 0.5) ns = os + roundTicks ((double) p.start * (qs - os));
+        if (p.lenMode == LEN_QUANT)
+        {
+            const int ql = std::max (p.grid, gridNear (n.len, p.grid));
+            n.len = n.len + roundTicks ((double) p.len * (ql - n.len));
+        }
+        else if (p.lenMode == END_LEAVE) n.len = oe - ns;
+        else if (p.lenMode == END_QUANT)
+        {
+            const int ne = oe + roundTicks ((double) p.len * (gridNear (oe, p.grid) - oe));
+            n.len = ne - ns;
+        }
+        n.start = ns;
+        out.push_back (n);
+    }
+    replaceScope (notes, sel, idx, out, c);
+}
+
+struct ChopP { int slice = 24; bool absolute = false; float gate = 1.f; };
+
+// Slices each note: from its own start (the last piece keeps the remainder), or on the loop grid when absolute.
+// Each piece is gate x its slice long.
+inline void chop (std::vector<Note>& notes, std::vector<char>& sel, const ChopP& p, const ToolCtx& c)
+{
+    if (p.slice <= 1) return;
+    const std::vector<int> idx = scope (sel, (int) notes.size());
+    std::vector<Note> out;
+    for (int i : idx)
+    {
+        const Note& n = notes[i];
+        const int end = n.start + n.len;
+        for (int a = n.start; a < end && a < c.loopTicks;)
+        {
+            const int b = std::min (end, p.absolute ? (a / p.slice + 1) * p.slice : a + p.slice);
+            out.push_back (Note (a, std::min (b - a, roundTicks ((double) (b - a) * p.gate)), n.pitch, n.vel));
+            a = b;
+        }
+    }
+    replaceScope (notes, sel, idx, out, c);
+}
+
+inline void quickChop (std::vector<Note>& notes, std::vector<char>& sel, const ToolCtx& c)
+{
+    ChopP p;
+    p.slice = c.snap;
+    chop (notes, sel, p, c);
+}
+
+enum { ART_LEGATO, ART_PORTATO, ART_STACCATO, ART_SMALLGAP, ART_CHOPCHORDS };
+struct ArticulateP { float length = 1.f, variation = 0.f; int seed = 1; bool useLengths = false, chopChords = false, smallGap = false; };
+
+inline ArticulateP articulatePreset (int preset)
+{
+    ArticulateP a;
+    switch (preset)
+    {
+    case ART_PORTATO: a.useLengths = true; a.length = 0.85f; break;
+    case ART_STACCATO: a.useLengths = true; a.length = 0.35f; break;
+    case ART_SMALLGAP: a.smallGap = true; break;
+    case ART_CHOPCHORDS: a.useLengths = true; a.chopChords = true; break;
+    default: break;
+    }
+    return a;
+}
+
+// Legato: a note ends where the next later start begins; the last keeps its length. Then length %, random shrink
+// (variation), and optionally a cut where the next chord starts.
+inline void articulate (std::vector<Note>& notes, std::vector<char>& sel, const ArticulateP& p, const ToolCtx& c)
+{
+    std::vector<int> idx = scope (sel, (int) notes.size());
+    std::sort (idx.begin(), idx.end(), [&notes] (int a, int b)
+    {
+        return notes[a].start != notes[b].start ? notes[a].start < notes[b].start : notes[a].pitch < notes[b].pitch;
+    });
+    std::vector<int> starts;
+    for (int i : idx) starts.push_back (notes[i].start);
+    starts.erase (std::unique (starts.begin(), starts.end()), starts.end());
+    Rng rng ((uint32_t) p.seed);
+    std::vector<Note> out;
+    for (int i : idx)
+    {
+        Note n = notes[i];
+        const std::vector<int>::iterator next = std::upper_bound (starts.begin(), starts.end(), n.start);
+        const bool hasNext = next != starts.end();
+        int len = n.len;
+        if ((! p.useLengths || p.smallGap) && hasNext) len = *next - n.start;
+        if (p.smallGap && hasNext) len = std::max (1, len - 2);
+        double l = len * (double) p.length;
+        l *= 1.0 - (double) p.variation * rng.uni();
+        n.len = std::max (1, roundTicks (l));
+        if (p.chopChords && hasNext && n.start + n.len > *next) n.len = *next - n.start;
+        out.push_back (n);
+    }
+    replaceScope (notes, sel, idx, out, c);
+}
+
+inline void quickLegato (std::vector<Note>& notes, std::vector<char>& sel, const ToolCtx& c)
+{
+    articulate (notes, sel, articulatePreset (ART_LEGATO), c);
+}
+
+struct FlipP { bool horizontal = true, vertical = false, preserveStarts = false; };
+
+// Horizontal mirrors time across the scope (start' = A + B - end); preserveStarts keeps the start slots and
+// reverses the notes through them instead. Vertical mirrors pitch across the scope's lowest and highest.
+inline void flip (std::vector<Note>& notes, std::vector<char>& sel, const FlipP& p, const ToolCtx& c)
+{
+    const std::vector<int> idx = scope (sel, (int) notes.size());
+    if (idx.empty()) return;
+    std::vector<Note> src;
+    for (int i : idx) src.push_back (notes[i]);
+    std::sort (src.begin(), src.end(), [] (const Note& a, const Note& b)
+    {
+        return a.start != b.start ? a.start < b.start : a.pitch < b.pitch;
+    });
+    int A = src[0].start, B = src[0].start + src[0].len, lo = src[0].pitch, hi = src[0].pitch;
+    for (const Note& n : src)
+    {
+        A = std::min (A, n.start);
+        B = std::max (B, n.start + n.len);
+        lo = std::min (lo, n.pitch);
+        hi = std::max (hi, n.pitch);
+    }
+    const int m = (int) src.size();
+    std::vector<Note> out;
+    for (int k = 0; k < m; ++k)
+    {
+        Note n = src[k];
+        if (p.horizontal)
+        {
+            if (p.preserveStarts) { n = src[m - 1 - k]; n.start = src[k].start; }
+            else n.start = A + B - (src[k].start + src[k].len);
+        }
+        if (p.vertical) n.pitch = lo + hi - n.pitch;
         out.push_back (n);
     }
     replaceScope (notes, sel, idx, out, c);

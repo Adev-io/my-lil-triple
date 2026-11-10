@@ -79,3 +79,64 @@ inline void testToolsQuick()
         check (d.size() == 2 && parallel (d, ds), "rotate in a full loop keeps both notes");
     }
 }
+
+inline void testToolsShape()
+{
+    ToolCtx c;
+    {
+        std::vector<Note> n = { Note (12, 24, 60, 0.8f) };
+        std::vector<char> s (1, 0);
+        QuantizeP q; q.start = 0.5f;
+        quantize (n, s, q, c);
+        check (n[0].start == 6 || n[0].start == 18, "quantize 50% strength moves halfway", n[0].start);   // 12 is a tie: either neighbour is fine
+        std::vector<Note> m = { Note (11, 24, 60, 0.8f) };
+        std::vector<char> ms (1, 0);
+        QuantizeP narrow; narrow.sens = 0.5f;   // window 6 ticks; 11 is 11 from 0 and 13 from 24
+        quantize (m, ms, narrow, c);
+        check (m[0].start == 11, "quantize sensitivity: a note outside the window keeps its start", m[0].start);
+        std::vector<Note> e = { Note (0, 30, 60, 0.8f) };
+        std::vector<char> es (1, 0);
+        QuantizeP qe; qe.lenMode = LEN_QUANT;
+        quantize (e, es, qe, c);
+        check (e[0].len == 24, "quantize length mode snaps the length", e[0].len);
+    }
+    {
+        std::vector<Note> n = { Note (10, PPQ, 60, 0.8f) };
+        std::vector<char> s (1, 0);
+        ChopP p; p.absolute = true;
+        chop (n, s, p, c);
+        n = sorted (n);
+        check (n.size() == 5 && n[0].start == 10 && n[0].len == 14 && n[1].start == 24, "absolute chop slices on the loop grid", (double) n.size());
+        std::vector<Note> g = { Note (0, PPQ, 60, 0.8f) };
+        std::vector<char> gs (1, 0);
+        ChopP half; half.gate = 0.5f;
+        chop (g, gs, half, c);
+        check (g.size() == 4 && g[0].len == 12, "chop gate 50% halves the pieces", g[0].len);
+    }
+    {
+        std::vector<Note> n = { Note (0, 10, 60, 0.8f), Note (48, 10, 62, 0.8f), Note (96, 10, 64, 0.8f) };
+        std::vector<char> s (3, 0);
+        quickLegato (n, s, c);
+        n = sorted (n);
+        check (n[0].len == 48 && n[1].len == 48 && n[2].len == 10, "legato: each note ends where the next starts; the last keeps its length");
+        ArticulateP st = articulatePreset (ART_STACCATO);
+        articulate (n, s, st, c);
+        n = sorted (n);
+        check (n[0].len == 17, "staccato: 35% of the length", n[0].len);   // round (48 * 0.35) = 17
+    }
+    {
+        const std::vector<Note> orig = { Note (0, 24, 60, 0.8f), Note (48, 48, 64, 0.5f), Note (120, 12, 67, 0.3f) };
+        std::vector<Note> n = orig;
+        std::vector<char> s (3, 0);
+        FlipP h;
+        flip (n, s, h, c);
+        flip (n, s, h, c);
+        check (sorted (n) == sorted (orig), "flip horizontal twice = original");
+        FlipP v; v.horizontal = false; v.vertical = true;
+        flip (n, s, v, c);
+        bool mirrored = true;
+        for (const Note& x : n) if (x.start == 0) mirrored = x.pitch == 67;
+        flip (n, s, v, c);
+        check (mirrored && sorted (n) == sorted (orig), "flip vertical mirrors pitch; twice = original");
+    }
+}
