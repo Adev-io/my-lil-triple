@@ -228,3 +228,131 @@ inline void testRollPlayer()
         check (pl.gateOut (0) && near (pl.voct (0), 1.0), "pitch 72 is +1 V", pl.voct (0));
     }
 }
+
+inline void testRollBank()
+{
+    const int gap = 48;
+    // 3-bar pattern -> 2-bar pattern switched at the 3-bar loop end: the 2-bar one starts at its own tick 0
+    {
+        Pattern a; a.bars = 3; a.add (Note (0, 24, 60, 0.8f));
+        Pattern b; b.bars = 2; b.add (Note (0, 24, 72, 0.8f));
+        Player pl;
+        pl.setPattern (&a);
+        bool switched = false, heard72 = false;
+        for (int i = 0; i < 1200 * 10; ++i)   // 10 samples per tick, 1200 ticks
+        {
+            const double pos = i / 10.0;
+            const long t = (long) pos;
+            if (! switched && t >= 3 * BAR) { pl.switchTo (&b, 3 * BAR); switched = true; }
+            pl.process (pos, gap);
+            if (t == 3 * BAR + 1 && pl.gateOut (0) && pl.ch[0].pitch == 72) heard72 = true;
+        }
+        check (heard72, "pattern switch at the loop end: the new pattern starts at its tick 0");
+    }
+    // live arp UP over a held C-E-G, 1/16 steps
+    {
+        Pattern p;
+        p.add (Note (0, BAR, 60, 0.8f)); p.add (Note (0, BAR, 64, 0.8f)); p.add (Note (0, BAR, 67, 0.8f));
+        Player pl; pl.setPattern (&p);
+        LiveArp arp; arp.mode = LIVE_UP;
+        std::vector<int> seq;
+        int highTicks = 0;
+        for (int i = 0; i < 96 * 10; ++i)
+        {
+            const double pos = i / 10.0;
+            pl.process (pos, gap);
+            arp.process (pl, pos, 24);
+            if (i % 240 == 5) seq.push_back (arp.gate ? (int) std::lround (60 + 12 * arp.voct) : -1);
+            if (i < 240 && arp.gate) ++highTicks;
+        }
+        check (seq == std::vector<int> ({ 60, 64, 67, 60 }), "live arp UP: C E G C on 1/16 steps");
+        check (highTicks >= 210 && highTicks <= 220, "live arp gate is high for ~90% of a step", highTicks);   // 10 samples/tick
+    }
+    {
+        Pattern p;
+        p.add (Note (0, BAR, 60, 0.8f)); p.add (Note (0, BAR, 64, 0.8f)); p.add (Note (0, BAR, 67, 0.8f));
+        Player pl; pl.setPattern (&p);
+        LiveArp ud; ud.mode = LIVE_UPDOWN;
+        std::vector<int> seq;
+        for (int i = 0; i < 8 * 24 * 10; ++i)
+        {
+            const double pos = i / 10.0;
+            pl.process (pos, gap);
+            ud.process (pl, pos, 24);
+            if (i % 240 == 5) seq.push_back ((int) std::lround (60 + 12 * ud.voct));
+        }
+        check (seq == std::vector<int> ({ 60, 64, 67, 64, 60, 64, 67, 64 }), "live arp UP-DOWN has period 4 for 3 notes");
+    }
+    {
+        Pattern p;
+        p.add (Note (0, 48, 60, 0.8f)); p.add (Note (0, 48, 64, 0.8f));
+        p.add (Note (48, 48, 62, 0.8f)); p.add (Note (48, 48, 65, 0.8f));
+        Player pl; pl.setPattern (&p);
+        LiveArp a; a.mode = LIVE_UP;
+        int atNewChord = -1;
+        for (int i = 0; i < 60 * 10; ++i)
+        {
+            const double pos = i / 10.0;
+            pl.process (pos, gap);
+            a.process (pl, pos, 24);
+            if (i == 48 * 10 + 5) atNewChord = (int) std::lround (60 + 12 * a.voct);
+        }
+        check (atNewChord == 62, "live arp restarts on a new chord", atNewChord);
+    }
+    {
+        Pattern p;
+        Player pl; pl.setPattern (&p);
+        LiveArp a; a.mode = LIVE_UP;
+        bool any = false;
+        for (int i = 0; i < 2000; ++i) { pl.process (i / 10.0, gap); a.process (pl, i / 10.0, 24); any = any || a.gate; }
+        check (! any, "live arp with nothing held stays silent");
+    }
+    // the other live arp modes (C-E-G held, 1/16 steps, one pitch read mid-step per step)
+    {
+        struct Run
+        {
+            static std::vector<int> go (int mode, const Pattern& p, int steps, LiveArp& a)
+            {
+                Player pl; pl.setPattern (&p);
+                a.mode = mode;
+                std::vector<int> seq;
+                for (int i = 0; i < steps * 240; ++i)
+                {
+                    const double pos = i / 10.0;
+                    pl.process (pos, 48);
+                    a.process (pl, pos, 24);
+                    if (i % 240 == 5) seq.push_back ((int) std::lround (60 + 12 * a.voct));
+                }
+                return seq;
+            }
+        };
+        Pattern p;
+        p.add (Note (0, BAR, 60, 0.8f)); p.add (Note (0, BAR, 64, 0.8f)); p.add (Note (0, BAR, 67, 0.8f));
+        LiveArp d, du, r1;
+        check (Run::go (LIVE_DOWN, p, 4, d) == std::vector<int> ({ 67, 64, 60, 67 }), "live arp DOWN: G E C G");
+        check (Run::go (LIVE_DOWNUP, p, 5, du) == std::vector<int> ({ 67, 64, 60, 64, 67 }), "live arp DOWN-UP: G E C E G");
+        const std::vector<int> s1 = Run::go (LIVE_RANDOM, p, 12, r1);
+        r1.reset();
+        const std::vector<int> s2 = Run::go (LIVE_RANDOM, p, 12, r1);
+        bool inPool = true;
+        for (int v : s1) inPool = inPool && (v == 60 || v == 64 || v == 67);
+        check (s1 == s2 && inPool, "live arp RANDOM repeats after reset and stays inside the pool");
+        check (s1 != std::vector<int> (12, s1[0]), "live arp RANDOM is not stuck on one note");
+    }
+    // AS PLAYED follows assignment order, not pitch
+    {
+        Pattern p;
+        p.add (Note (0, BAR, 67, 0.8f)); p.add (Note (1, BAR, 60, 0.8f)); p.add (Note (2, BAR, 64, 0.8f));
+        Player pl; pl.setPattern (&p);
+        LiveArp a; a.mode = LIVE_PLAYED;
+        std::vector<int> seq;
+        for (int i = 0; i < 5 * 240; ++i)
+        {
+            const double pos = i / 10.0;
+            pl.process (pos, 48);
+            a.process (pl, pos, 24);
+            if (i >= 240 && i % 240 == 5) seq.push_back ((int) std::lround (60 + 12 * a.voct));
+        }
+        check (seq == std::vector<int> ({ 67, 60, 64, 67 }), "live arp AS PLAYED cycles in the order the notes started");
+    }
+}

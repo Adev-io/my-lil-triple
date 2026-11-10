@@ -16,6 +16,7 @@ int main()
     testRollData();
     testRollClock();
     testRollPlayer();
+    testRollBank();
     testToolsQuick();
     testToolsShape();
     testToolsTime();

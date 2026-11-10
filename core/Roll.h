@@ -3,6 +3,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <locale>
 #include <sstream>
 #include <string>
@@ -162,11 +163,14 @@ struct Player
     long last = -1;         // the tick evaluated last (absolute, since reset)
     bool resync = true;     // next evaluation starts every note that covers the playhead
     long ages = 0;
+    long origin = 0;        // tick where the playing pattern's loop starts (moves when a pattern switch lands on a loop end)
 
     static int key (const Note& n) { return n.start * 128 + n.pitch; }
     void setPattern (const Pattern* p) { pat = p; resync = true; }
+    // Switch pattern with its tick 0 at atTick (the loop end of the old one). The next evaluation starts every covering note.
+    void switchTo (const Pattern* p, long atTick) { pat = p; origin = atTick; resync = true; }
     void releaseAll() { for (Chan& c : ch) { c.key = -1; c.gate = false; c.gap = 0; } }
-    void reset() { releaseAll(); last = -1; resync = true; chans = 1; }
+    void reset() { releaseAll(); last = -1; resync = true; chans = 1; origin = 0; }
     bool gateOut (int i) const { return ch[i].gate && ch[i].gap == 0; }
     float voct (int i) const { return (ch[i].pitch - 60) / 12.f; }
 
@@ -183,9 +187,10 @@ struct Player
         const int L = pat ? pat->ticks() : 4 * BAR;
         const long prev = last;
         last = t;
-        const bool eoc = prev >= 0 && t / L != prev / L;
-        const int lt = (int) (t % L), plt = prev >= 0 ? (int) (prev % L) : -1;
-        const bool all = resync || prev < 0, sameLoop = prev >= 0 && t / L == prev / L;
+        const long rel = t - origin, prel = prev - origin;   // loop maths runs from the origin
+        const bool eoc = prev >= 0 && (prel < 0 || rel / L != prel / L);
+        const int lt = (int) (rel % L), plt = prev >= 0 && prel >= 0 ? (int) (prel % L) : -1;
+        const bool all = resync || prev < 0, sameLoop = prev >= 0 && prel >= 0 && rel / L == prel / L;
         resync = false;
 
         // notes covering the playhead (cut at the loop end); per pitch only the newest start
@@ -237,5 +242,88 @@ struct Player
             chans = std::max (chans, c + 1);
         }
         return eoc;
+    }
+};
+
+enum { LIVE_OFF, LIVE_UP, LIVE_DOWN, LIVE_UPDOWN, LIVE_DOWNUP, LIVE_PLAYED, LIVE_RANDOM };
+
+// Non-destructive arpeggiator over the notes the player is holding: one voice out. No allocation (runs every sample).
+struct LiveArp
+{
+    int mode = LIVE_OFF;
+    float voct = 0.f, vel = 0.f;
+    bool gate = false;
+
+    // internal
+    int lastPool[MAX_CH];        // the pool (pitches in pool order) at the last step
+    int lastN = 0;
+    long long lastIdx = -1;      // the step index at the last step boundary
+    int counter = 0;
+    bool picked = false;         // voct / vel hold a pick for the current step
+    uint32_t rng = 2463534242u;
+
+    LiveArp() { reset(); }
+    void reset()
+    {
+        gate = false; voct = 0.f; vel = 0.f;
+        lastN = 0; lastIdx = -1; counter = 0; picked = false;
+        rng = 2463534242u;
+    }
+
+    // Call every sample after player.process. pos = clock ticks since reset; step >= 1 ticks. The grid starts at player.origin.
+    void process (const Player& pl, double pos, int step)
+    {
+        if (mode == LIVE_OFF) { gate = false; lastN = 0; lastIdx = -1; counter = 0; picked = false; return; }
+        if (step < 1) step = 1;
+
+        // pool: held channels, ascending by pitch, or by age for AS PLAYED (insertion sort, 16 at most)
+        int pitch[MAX_CH], n = 0;
+        float vl[MAX_CH];
+        long ord[MAX_CH];
+        for (int c = 0; c < MAX_CH; ++c)
+        {
+            if (pl.ch[c].key < 0) continue;
+            const long o = mode == LIVE_PLAYED ? pl.ch[c].age : (long) pl.ch[c].pitch;
+            int j = n++;
+            while (j > 0 && ord[j - 1] > o) { ord[j] = ord[j - 1]; pitch[j] = pitch[j - 1]; vl[j] = vl[j - 1]; --j; }
+            ord[j] = o; pitch[j] = pl.ch[c].pitch; vl[j] = pl.ch[c].vel;
+        }
+
+        const double rel = pos - (double) pl.origin;
+        const long long idx = (long long) std::floor (rel / step);
+        if (idx != lastIdx || (! picked && n > 0))   // a new step, or a chord that arrived mid-step with nothing picked yet
+        {
+            bool same = n == lastN;
+            for (int i = 0; same && i < n; ++i) same = pitch[i] == lastPool[i];
+            counter = same ? counter + 1 : 0;
+            for (int i = 0; i < n; ++i) lastPool[i] = pitch[i];
+            lastN = n;
+            lastIdx = idx;
+            picked = n > 0;
+            if (n > 0)
+            {
+                int k = 0;
+                switch (mode)
+                {
+                    case LIVE_UP: case LIVE_PLAYED: counter %= n; k = counter; break;
+                    case LIVE_DOWN: counter %= n; k = n - 1 - counter; break;
+                    case LIVE_UPDOWN: case LIVE_DOWNUP:
+                    {
+                        const int period = n > 1 ? 2 * n - 2 : 1;
+                        counter %= period;
+                        k = counter < n ? counter : period - counter;
+                        if (mode == LIVE_DOWNUP) k = n - 1 - k;
+                        break;
+                    }
+                    default:   // LIVE_RANDOM: xorshift32
+                        rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+                        k = (int) (rng % (uint32_t) n);
+                        break;
+                }
+                voct = (pitch[k] - 60) / 12.f;
+                vel = vl[k];
+            }
+        }
+        gate = n > 0 && std::fmod (rel, (double) step) < 0.9 * step;
     }
 };
