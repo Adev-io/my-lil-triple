@@ -213,6 +213,95 @@ inline void testToolsShape()
     }
 }
 
+inline bool hasNote (const std::vector<Note>& n, int start, int pitch)
+{
+    for (const Note& x : n) if (x.start == start && x.pitch == pitch) return true;
+    return false;
+}
+
+// A tool never drops a scoped note: out-of-loop starts, the MAX_NOTES cap, grace notes.
+inline void testToolsNoLoss()
+{
+    ToolCtx c;
+    {
+        ToolCtx one = c;
+        one.loopTicks = BAR;   // shrunk loop: the note at 400 is past the end
+        std::vector<Note> n = { Note (0, 48, 60, 0.8f), Note (400, 48, 62, 0.8f) };
+        std::vector<char> s (2, 1);
+        ChopP p;
+        chop (n, s, p, one);
+        bool a = false, b = false;
+        for (const Note& x : n) { a = a || x.pitch == 60; b = b || (x.pitch == 62 && x.start == BAR - 1 && x.len == 48); }
+        check (a && b && parallel (n, s), "chop keeps a note that starts past the loop end (clamped like every tool)", (double) n.size());
+        std::vector<Note> m = { Note (0, 48, 60, 0.8f), Note (400, 48, 62, 0.8f) };
+        std::vector<char> ms (2, 1);
+        arpeggiate (m, ms, ArpP(), one);
+        bool c60 = false, c62 = false;
+        for (const Note& x : m) { c60 = c60 || x.pitch == 60; c62 = c62 || (x.pitch == 62 && x.start == BAR - 1); }
+        check (c60 && c62 && parallel (m, ms), "arpeggiate keeps a chord that starts past the loop end", (double) m.size());
+    }
+    {
+        std::vector<Note> n;   // 100 chords x 96 steps would be 9600 notes
+        for (int i = 0; i < 100; ++i) n.push_back (Note (i * 12, 96, 10 + i, 0.8f));
+        std::vector<char> s (n.size(), 0);
+        ArpP a; a.step = 1; a.gate = 1.f;
+        arpeggiate (n, s, a, c);
+        bool all = true;
+        for (int i = 0; i < 100; ++i) all = all && hasNote (n, i * 12, 10 + i);
+        check ((int) n.size() <= MAX_NOTES && all && parallel (n, s), "arpeggiate at MAX_NOTES: every source chord still has a note at its start", (double) n.size());
+        std::vector<Note> m;
+        for (int i = 0; i < 100; ++i) m.push_back (Note (i * 12, 96, 10 + i, 0.8f));
+        std::vector<char> ms (m.size(), 0);
+        ChopP p; p.slice = 2;   // 48 pieces each
+        chop (m, ms, p, c);
+        bool allc = true;
+        for (int i = 0; i < 100; ++i) allc = allc && hasNote (m, i * 12, 10 + i);
+        check ((int) m.size() <= MAX_NOTES && allc && parallel (m, ms), "chop at MAX_NOTES: every source note still has a note at its start", (double) m.size());
+    }
+    {
+        std::vector<Note> n;   // 4000 notes + their grace notes would be 8000
+        for (int i = 0; i < 4000; ++i) n.push_back (Note (24 + (i / 100) * 24, 10, i % 100, 0.8f));
+        std::vector<char> s (n.size(), 0);
+        const std::vector<Note> orig = n;
+        flam (n, s, FlamP(), c);
+        bool all = (int) n.size() <= MAX_NOTES;
+        for (const Note& o : orig) all = all && hasNote (n, o.start, o.pitch);
+        check (all && parallel (n, s), "flam at MAX_NOTES: grace notes give way, real notes stay", (double) n.size());
+        std::vector<Note> k = { Note (24, 48, 60, 1.f), Note (12, 12, 60, 0.5f) };   // the grace note of the first lands on the second
+        std::vector<char> ks (2, 0);
+        flam (k, ks, FlamP(), c);
+        bool real = false;
+        for (const Note& x : k) if (x.start == 12 && x.pitch == 60) real = x.len == 12 && near (x.vel, 0.5);
+        check (real, "flam: a real note wins a start + pitch clash with a grace note");
+    }
+    {
+        std::vector<Note> n = { Note (0, 24, 61, 0.5f), Note (96, 24, 63, 0.5f), Note (192, 24, 66, 0.5f) };
+        std::vector<char> s (3, 0);
+        const size_t before = n.size();
+        LimitP l; l.low = 60; l.high = 64; l.scaleFix = FIX_ABOVE;
+        limit (n, s, l, c);
+        strum (n, s, StrumP(), c);
+        ScaleLevelsP sl; sl.multiply = 0.5f;
+        scaleLevels (n, s, sl, c);
+        LfoP lfo;
+        velocityLfo (n, s, lfo, c);
+        check (n.size() == before && parallel (n, s), "limit, strum (lone notes), scale levels and LFO never lose a note", (double) n.size());
+    }
+    {
+        const std::vector<Note> base = { Note (0, 96, 30, 0.5f), Note (96, 96, 31, 0.5f), Note (192, 96, 32, 0.5f) };   // below the pattern octave
+        std::vector<Note> on = base, off = base;
+        std::vector<char> son (3, 0), soff (3, 0);
+        RandomizeP r; r.pattern = true; r.seed = 3; r.velAmount = 0.5f;
+        randomize (on, son, r, c);
+        r.levels = false;
+        randomize (off, soff, r, c);
+        std::vector<Note> gOn, gOff;
+        for (const Note& x : on) if (x.pitch >= 60) gOn.push_back (x);
+        for (const Note& x : off) if (x.pitch >= 60) gOff.push_back (x);
+        check (! gOn.empty() && sorted (gOn) == sorted (gOff), "randomize: the generated pattern is the same with Levels on or off", (double) gOn.size());
+    }
+}
+
 inline void testToolsTime()
 {
     ToolCtx c;
@@ -350,6 +439,7 @@ inline void testToolsTime()
         t = sorted (t);
         check (t.size() == 2 && t[1].start == 108 && t[1].len == 1, "flam after: the delayed note keeps at least 1 tick", t[1].len);
     }
+    testToolsNoLoss();
 }
 
 inline void testToolsLevels()

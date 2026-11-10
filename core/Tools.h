@@ -224,22 +224,29 @@ inline void quantize (std::vector<Note>& notes, std::vector<char>& sel, const Qu
 struct ChopP { int slice = 24; bool absolute = false; float gate = 1.f; };
 
 // Slices each note: from its own start (the last piece keeps the remainder), or on the loop grid when absolute.
-// Each piece is gate x its slice long.
+// Each piece is gate x its slice long. A note with no pieces (it starts at or past the loop end) or whose pieces
+// would not fit under MAX_NOTES is written back unchanged: a tool never drops a scoped note.
 inline void chop (std::vector<Note>& notes, std::vector<char>& sel, const ChopP& p, const ToolCtx& c)
 {
     if (p.slice <= 1) return;
     const std::vector<int> idx = scope (sel, (int) notes.size());
+    const int room = MAX_NOTES - ((int) notes.size() - (int) idx.size());   // what replaceScope can hold for the scope
+    int left = (int) idx.size();
     std::vector<Note> out;
     for (int i : idx)
     {
         const Note& n = notes[i];
         const int end = n.start + n.len;
+        std::vector<Note> pieces;
         for (int a = n.start; a < end && a < c.loopTicks;)
         {
             const int b = std::min (end, p.absolute ? (a / p.slice + 1) * p.slice : a + p.slice);
-            out.push_back (Note (a, std::min (b - a, roundTicks ((double) (b - a) * p.gate)), n.pitch, n.vel));
+            pieces.push_back (Note (a, std::min (b - a, roundTicks ((double) (b - a) * p.gate)), n.pitch, n.vel));
             a = b;
         }
+        --left;
+        if (pieces.empty() || (int) (out.size() + pieces.size()) + left > room) out.push_back (n);
+        else out.insert (out.end(), pieces.begin(), pieces.end());
     }
     replaceScope (notes, sel, idx, out, c);
 }
@@ -352,7 +359,8 @@ struct FlamP { int time = 12; bool before = true; float vel = 0.6f; };
 
 // Each chord (same start) becomes a run of one note per step over the chord's longest length. The pool is the chord's
 // pitches ascending (ARP_PLAYED: in note order), repeated per octave; order picks the octave sequence (normal low->high,
-// flip high->low, alternate 0, top, 1, top-1 ...). Velocity comes from the source note.
+// flip high->low, alternate 0, top, 1, top-1 ...). Velocity comes from the source note. A chord that gets no run
+// is written back unchanged; runs are cut short to leave later chords room under MAX_NOTES.
 inline void arpeggiate (std::vector<Note>& notes, std::vector<char>& sel, const ArpP& p, const ToolCtx& c)
 {
     if (p.step < 1) return;
@@ -367,9 +375,13 @@ inline void arpeggiate (std::vector<Note>& notes, std::vector<char>& sel, const 
     }
     const int len = std::max (1, roundTicks ((double) p.step * p.gate));
     Rng rng ((uint32_t) p.seed);
+    const int room = MAX_NOTES - ((int) notes.size() - (int) idx.size());   // what replaceScope can hold for the scope
+    int left = (int) idx.size();
     std::vector<Note> out;
     for (std::vector<int>& ch : chords (notes, idx))
     {
+        left -= (int) ch.size();
+        const size_t before = out.size();
         if (p.pattern == ARP_PLAYED) std::sort (ch.begin(), ch.end());
         const int start = notes[ch[0]].start;
         int longest = 1;
@@ -384,11 +396,14 @@ inline void arpeggiate (std::vector<Note>& notes, std::vector<char>& sel, const 
         if (p.pattern == ARP_UPDOWN || p.pattern == ARP_DOWNUP)
             for (int k = m - 2; k >= 1; --k) cyc.push_back (p.pattern == ARP_DOWNUP ? m - 1 - k : k);
         const int end = start + longest;
-        for (int t = start, i = 0; t < end && t < c.loopTicks && (int) out.size() < MAX_NOTES; t += p.step, ++i)
+        // the run stops early so the chords still to come keep room for at least their own notes
+        for (int t = start, i = 0; t < end && t < c.loopTicks && (int) out.size() + left < room; t += p.step, ++i)
         {
             const int pick = p.pattern == ARP_RANDOM ? std::min (m - 1, (int) (rng.uni() * m)) : cyc[i % cyc.size()];
             out.push_back (Note (t, std::min (len, end - t), pool[pick].pitch, pool[pick].vel));
         }
+        if (out.size() == before)   // no run (starts at or past the loop end, or no room): the chord stays as it was
+            for (int i : ch) out.push_back (notes[i]);
     }
     replaceScope (notes, sel, idx, out, c);
 }
@@ -431,7 +446,7 @@ inline void flam (std::vector<Note>& notes, std::vector<char>& sel, const FlamP&
 {
     const std::vector<int> idx = scope (sel, (int) notes.size());
     const int t = std::max (1, p.time);
-    std::vector<Note> graces, mains;   // mains go last: on a start + pitch clash the real note wins
+    std::vector<Note> graces, mains;   // mains go first so MAX_NOTES drops grace notes, never the real ones
     for (int i : idx)
     {
         Note n = notes[i];
@@ -449,8 +464,10 @@ inline void flam (std::vector<Note>& notes, std::vector<char>& sel, const FlamP&
         }
         mains.push_back (n);
     }
-    graces.insert (graces.end(), mains.begin(), mains.end());
-    replaceScope (notes, sel, idx, graces, c);
+    std::unordered_map<int, char> taken;   // a grace note never replaces a real one on the same start + pitch
+    for (const Note& n : mains) taken[n.start * 128 + n.pitch] = 1;
+    for (const Note& g : graces) if (! taken.count (g.start * 128 + g.pitch)) mains.push_back (g);
+    replaceScope (notes, sel, idx, mains, c);
 }
 
 // ---- limit, randomize, scale levels, velocity LFO ----
@@ -538,14 +555,15 @@ inline void randomize (std::vector<Note>& notes, std::vector<char>& sel, const R
             if (q >= 0 && inScale (q, c.key, c.mode)) pool.push_back (q);
         std::unordered_map<int, char> taken;   // start * 128 + pitch of every existing note
         for (const Note& n : notes) taken[n.start * 128 + n.pitch] = 1;
+        Rng prng ((uint32_t) p.seed * 2654435761u + 1u);   // its own stream: toggling Levels leaves the pattern alone
         std::vector<Note> gen;
         for (int t = A; t < B && ! pool.empty(); t += c.snap)
         {
-            if (rng.uni() >= p.population) continue;
+            if (prng.uni() >= p.population) continue;
             for (int s = 0; s < std::max (1, std::min (p.stack, 4)); ++s)
             {
-                const int pitch = pool[std::min ((int) pool.size() - 1, (int) (rng.uni() * pool.size()))];
-                const double u = rng.uni();
+                const int pitch = pool[std::min ((int) pool.size() - 1, (int) (prng.uni() * pool.size()))];
+                const double u = prng.uni();
                 int len = c.snap;
                 if (p.lenVar > 0.f) len = c.snap * (1 + (int) std::floor (u * 4.0 * p.lenVar));
                 else if (p.lenVar < 0.f) len = std::max (1, roundTicks (c.snap * (1.0 - u * -p.lenVar * 0.75)));
