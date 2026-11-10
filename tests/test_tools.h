@@ -212,3 +212,142 @@ inline void testToolsShape()
         check ((int) n.size() <= MAX_NOTES && n.size() > 0 && parallel (n, s), "4096 selected notes quantize (fast replaceScope)", (double) n.size());
     }
 }
+
+inline void testToolsTime()
+{
+    ToolCtx c;
+    const std::vector<Note> ceg = { Note (0, PPQ, 60, 0.8f), Note (0, PPQ, 64, 0.8f), Note (0, PPQ, 67, 0.8f) };
+    {
+        std::vector<Note> n = ceg;
+        std::vector<char> s (3, 0);
+        ArpP a;
+        arpeggiate (n, s, a, c);
+        n = sorted (n);
+        check (n.size() == 4 && n[0].pitch == 60 && n[1].pitch == 64 && n[2].pitch == 67 && n[3].pitch == 60
+               && n[1].start == 24 && n[3].start == 72 && n[0].len == 22, "arp up 1 oct 1/16 over a beat: C E G C", (double) n.size());   // round (24 * 0.9) = 22
+        std::vector<Note> u = ceg;
+        std::vector<char> us (3, 0);
+        ArpP ud; ud.pattern = ARP_UPDOWN; ud.step = 12;
+        arpeggiate (u, us, ud, c);
+        u = sorted (u);
+        check (u.size() == 8 && u[3].pitch == 64 && u[4].pitch == 60, "arp up-down: C E G E C E G E");
+        std::vector<Note> o = ceg;
+        std::vector<char> os (3, 0);
+        ArpP two; two.octaves = 2; two.step = 12;
+        arpeggiate (o, os, two, c);
+        o = sorted (o);
+        check (o.size() == 8 && o[3].pitch == 72 && o[5].pitch == 79, "arp 2 octaves climbs into the next octave");
+    }
+    {
+        std::vector<Note> n = ceg;
+        std::vector<char> s (3, 0);
+        StrumP p;
+        strum (n, s, p, c);
+        n = sorted (n);
+        check (n[0].pitch == 60 && n[0].start == 0 && n[1].start == 12 && n[2].start == 24, "strum + : low to high, even spacing at tension 0");
+        check (n[2].start + n[2].len == PPQ, "strum preserve end keeps the ends");
+        std::vector<Note> d = ceg;
+        std::vector<char> ds (3, 0);
+        StrumP neg; neg.time = -0.25f;
+        strum (d, ds, neg, c);
+        d = sorted (d);
+        check (d[0].pitch == 67 && d[2].pitch == 60, "strum - : high to low");
+        std::vector<Note> v = ceg;
+        std::vector<char> vs (3, 0);
+        StrumP fall; fall.velFall = 0.5f;
+        strum (v, vs, fall, c);
+        v = sorted (v);
+        check (near (v[0].vel, 0.8, 1e-4) && near (v[2].vel, 0.4, 1e-4), "strum velocity fall: last note loses 50%", v[2].vel);
+    }
+    {
+        std::vector<Note> n = { Note (96, 48, 60, 1.f) };
+        std::vector<char> s (1, 0);
+        FlamP f;
+        flam (n, s, f, c);
+        n = sorted (n);
+        check (n.size() == 2 && n[0].start == 84 && n[0].len == 12 && near (n[0].vel, 0.6) && n[1].start == 96, "flam: grace note 12 ticks before at 60%");
+        std::vector<Note> a = { Note (96, 48, 60, 1.f) };
+        std::vector<char> as (1, 0);
+        FlamP after; after.before = false;
+        flam (a, as, after, c);
+        a = sorted (a);
+        check (a.size() == 2 && a[0].start == 96 && a[1].start == 108 && a[1].len == 36, "flam after: note delayed, grace on the beat");
+        check (parallel (a, as), "sel stays parallel after flam");
+    }
+    {   // edge cases
+        std::vector<Note> n = { Note (0, 96, 60, 0.8f), Note (0, 48, 64, 0.7f) };
+        std::vector<char> s (2, 0);
+        ArpP a; a.step = 48; a.gate = 1.f;
+        arpeggiate (n, s, a, c);
+        n = sorted (n);
+        check (n.size() == 2 && n[0].pitch == 60 && n[0].len == 48 && n[1].pitch == 64 && n[1].start == 48 && near (n[1].vel, 0.7),
+               "arp runs over the longest note; velocity from the source note", (double) n.size());
+        std::vector<Note> pl = { Note (0, PPQ, 67, 0.8f), Note (0, PPQ, 60, 0.8f), Note (0, PPQ, 64, 0.8f) };
+        std::vector<char> ps (3, 0);
+        ArpP played; played.pattern = ARP_PLAYED; played.step = 48;
+        arpeggiate (pl, ps, played, c);
+        pl = sorted (pl);
+        check (pl.size() == 2 && pl[0].pitch == 67 && pl[1].pitch == 60, "arp as played: pool in note order (G C)");
+        std::vector<Note> r1 = ceg, r2 = ceg;
+        std::vector<char> rs1 (3, 0), rs2 (3, 0);
+        ArpP rnd; rnd.pattern = ARP_RANDOM; rnd.step = 6; rnd.seed = 5;
+        arpeggiate (r1, rs1, rnd, c);
+        arpeggiate (r2, rs2, rnd, c);
+        bool inPool = r1.size() == 16;
+        for (const Note& x : r1) inPool = inPool && (x.pitch == 60 || x.pitch == 64 || x.pitch == 67);
+        check (r1 == r2 && inPool && parallel (r1, rs1), "arp random: same seed same run, only chord pitches", (double) r1.size());
+        std::vector<Note> dn = ceg;
+        std::vector<char> dns (3, 0);
+        ArpP fl; fl.order = OCT_FLIP; fl.octaves = 2; fl.step = 12;
+        arpeggiate (dn, dns, fl, c);
+        dn = sorted (dn);
+        check (dn[0].pitch == 72 && dn[3].pitch == 60, "arp flipped octave order starts in the upper octave", dn[0].pitch);
+        std::vector<Note> one = { Note (0, 48, 60, 0.8f) };
+        std::vector<char> os (1, 0);
+        arpeggiate (one, os, ArpP(), c);
+        check (one.size() == 2 && one[0].pitch == 60 && one[1].pitch == 60, "arp on a lone note repeats it");
+    }
+    {
+        std::vector<Note> n = { Note (0, 48, 60, 0.8f) };
+        const std::vector<Note> before = n;
+        std::vector<char> s (1, 0);
+        strum (n, s, StrumP(), c);
+        check (n == before, "strum on a 1-note chord changes nothing (no n-1 divide)");
+        std::vector<Note> two = { Note (0, 48, 60, 0.8f), Note (0, 48, 64, 0.8f), Note (96, 48, 60, 0.8f), Note (96, 48, 64, 0.8f), Note (192, 48, 60, 0.8f), Note (192, 48, 64, 0.8f) };
+        std::vector<char> ts (6, 0);
+        StrumP alt; alt.alternate = true;
+        strum (two, ts, alt, c);
+        two = sorted (two);
+        check (two[0].pitch == 60 && two[2].pitch == 64 && two[2].start == 96 && two[3].pitch == 60 && two[3].start == 120 && two[4].pitch == 60 && two[4].start == 192,
+               "strum alternate flips direction on every next chord");
+        std::vector<Note> sh = { Note (0, 10, 60, 0.8f), Note (0, 10, 64, 0.8f) };
+        std::vector<char> ss (2, 0);
+        StrumP big; big.time = 1.f;
+        strum (sh, ss, big, c);
+        sh = sorted (sh);
+        check (sh[1].start == 96 && sh[1].len == 1 && sh[0].len == 10, "strum preserve end never shrinks below 1 tick", sh[1].len);
+        std::vector<Note> tn = ceg;
+        std::vector<char> tns (3, 0);
+        StrumP tp; tp.tension = 1.f;
+        strum (tn, tns, tp, c);
+        tn = sorted (tn);
+        check (tn[1].start == 20 && tn[2].start == 24, "strum tension + bunches later notes", tn[1].start);   // 24 x 0.5^(2^-2) = 20.18
+    }
+    {
+        std::vector<Note> n = { Note (0, 48, 60, 1.f) };
+        std::vector<char> s (1, 0);
+        flam (n, s, FlamP(), c);
+        check (n.size() == 1 && n[0].start == 0 && n[0].len == 48, "flam before at start 0: no grace note");
+        std::vector<Note> e = { Note (5, 48, 60, 1.f) };
+        std::vector<char> es (1, 0);
+        flam (e, es, FlamP(), c);
+        e = sorted (e);
+        check (e.size() == 2 && e[0].start == 0 && e[0].len == 5 && e[1].start == 5, "flam near the start: a shorter grace note from tick 0");
+        std::vector<Note> t = { Note (96, 8, 60, 1.f) };
+        std::vector<char> ts (1, 0);
+        FlamP after; after.before = false;
+        flam (t, ts, after, c);
+        t = sorted (t);
+        check (t.size() == 2 && t[1].start == 108 && t[1].len == 1, "flam after: the delayed note keeps at least 1 tick", t[1].len);
+    }
+}

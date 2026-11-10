@@ -341,3 +341,114 @@ inline void flip (std::vector<Note>& notes, std::vector<char>& sel, const FlipP&
     }
     replaceScope (notes, sel, idx, out, c);
 }
+
+// ---- arpeggiate, strum, flam ----
+
+enum { ARP_UP, ARP_DOWN, ARP_UPDOWN, ARP_DOWNUP, ARP_PLAYED, ARP_RANDOM };
+enum { OCT_NORMAL, OCT_FLIP, OCT_ALT };
+struct ArpP { int pattern = ARP_UP, step = 24, octaves = 1, order = OCT_NORMAL; float gate = 0.9f; int seed = 1; };
+struct StrumP { float time = 0.25f, tension = 0.f, velFall = 0.f, velTension = 0.f; bool preserveEnd = true, alternate = false; };
+struct FlamP { int time = 12; bool before = true; float vel = 0.6f; };
+
+// Each chord (same start) becomes a run of one note per step over the chord's longest length. The pool is the chord's
+// pitches ascending (ARP_PLAYED: in note order), repeated per octave; order picks the octave sequence (normal low->high,
+// flip high->low, alternate 0, top, 1, top-1 ...). Velocity comes from the source note.
+inline void arpeggiate (std::vector<Note>& notes, std::vector<char>& sel, const ArpP& p, const ToolCtx& c)
+{
+    if (p.step < 1) return;
+    const std::vector<int> idx = scope (sel, (int) notes.size());
+    const int oct = std::max (1, std::min (p.octaves, 4));
+    std::vector<int> octSeq;
+    for (int lo = 0, hi = oct - 1; lo <= hi;)
+    {
+        if (p.order == OCT_FLIP) octSeq.push_back (hi--);
+        else if (p.order == OCT_ALT) octSeq.push_back (octSeq.size() % 2 == 0 ? lo++ : hi--);
+        else octSeq.push_back (lo++);
+    }
+    const int len = std::max (1, roundTicks ((double) p.step * p.gate));
+    Rng rng ((uint32_t) p.seed);
+    std::vector<Note> out;
+    for (std::vector<int>& ch : chords (notes, idx))
+    {
+        if (p.pattern == ARP_PLAYED) std::sort (ch.begin(), ch.end());
+        const int start = notes[ch[0]].start;
+        int longest = 1;
+        std::vector<Note> pool;   // pitch + vel only
+        for (int i : ch) longest = std::max (longest, notes[i].len);
+        for (int o : octSeq)
+            for (int i : ch)
+                if (notes[i].pitch + 12 * o <= 127) pool.push_back (Note (0, 1, notes[i].pitch + 12 * o, notes[i].vel));
+        const int m = (int) pool.size();
+        std::vector<int> cyc;   // pool indices of one pass
+        for (int k = 0; k < m; ++k) cyc.push_back (p.pattern == ARP_DOWN || p.pattern == ARP_DOWNUP ? m - 1 - k : k);
+        if (p.pattern == ARP_UPDOWN || p.pattern == ARP_DOWNUP)
+            for (int k = m - 2; k >= 1; --k) cyc.push_back (p.pattern == ARP_DOWNUP ? m - 1 - k : k);
+        const int end = start + longest;
+        for (int t = start, i = 0; t < end && t < c.loopTicks && (int) out.size() < MAX_NOTES; t += p.step, ++i)
+        {
+            const int pick = p.pattern == ARP_RANDOM ? std::min (m - 1, (int) (rng.uni() * m)) : cyc[i % cyc.size()];
+            out.push_back (Note (t, std::min (len, end - t), pool[pick].pitch, pool[pick].vel));
+        }
+    }
+    replaceScope (notes, sel, idx, out, c);
+}
+
+// x^(2^(-2 t)): t = 0 even, t > 0 bunches later values together, t < 0 spreads them.
+inline double tensionCurve (double x, double t) { return std::pow (x, std::pow (2.0, -2.0 * t)); }
+
+// Chord notes start staggered over `time` beats: note k of n at start + |time| x f(k/(n-1)), low->high for time >= 0,
+// high->low below 0 (alternate flips it on every next chord of 2+ notes). A lone note is left alone.
+// Velocity fall: later notes lose up to velFall of their velocity.
+inline void strum (std::vector<Note>& notes, std::vector<char>& sel, const StrumP& p, const ToolCtx& c)
+{
+    const std::vector<int> idx = scope (sel, (int) notes.size());
+    std::vector<Note> out;
+    bool flipped = false;
+    for (std::vector<int>& ch : chords (notes, idx))
+    {
+        const int n = (int) ch.size();
+        if (n < 2) { out.push_back (notes[ch[0]]); continue; }
+        if ((p.time < 0.f) != flipped) std::reverse (ch.begin(), ch.end());
+        if (p.alternate) flipped = ! flipped;
+        for (int k = 0; k < n; ++k)
+        {
+            Note x = notes[ch[k]];
+            const double f = (double) k / (n - 1);
+            const int end = x.start + x.len;
+            x.start += roundTicks (std::abs ((double) p.time) * PPQ * tensionCurve (f, p.tension));
+            if (p.preserveEnd) x.len = std::max (1, end - x.start);
+            x.vel = (float) (x.vel * (1.0 - (double) p.velFall * tensionCurve (f, p.velTension)));
+            out.push_back (x);
+        }
+    }
+    replaceScope (notes, sel, idx, out, c);
+}
+
+// A grace note of the same pitch, `time` ticks long, at vel x the note's velocity. Before: it ends at the note start
+// (a note closer than `time` to 0 gets a shorter one; a note at 0 gets none). After: the note is delayed by `time`
+// (length shrinks, never below 1) and the grace note takes the original start.
+inline void flam (std::vector<Note>& notes, std::vector<char>& sel, const FlamP& p, const ToolCtx& c)
+{
+    const std::vector<int> idx = scope (sel, (int) notes.size());
+    const int t = std::max (1, p.time);
+    std::vector<Note> graces, mains;   // mains go last: on a start + pitch clash the real note wins
+    for (int i : idx)
+    {
+        Note n = notes[i];
+        const float gv = n.vel * p.vel;
+        if (p.before)
+        {
+            const int gs = std::max (0, n.start - t);
+            if (n.start > 0) graces.push_back (Note (gs, n.start - gs, n.pitch, gv));
+        }
+        else
+        {
+            graces.push_back (Note (n.start, t, n.pitch, gv));
+            n.start += t;
+            n.len = std::max (1, n.len - t);
+        }
+        mains.push_back (n);
+    }
+    graces.insert (graces.end(), mains.begin(), mains.end());
+    replaceScope (notes, sel, idx, graces, c);
+}
