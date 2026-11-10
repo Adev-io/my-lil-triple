@@ -1,15 +1,27 @@
 // Roll.cpp: the My lil Roll panel widget and the model.
 // Author: Ari Klopfer / A_Development · MIT
 #include "Roll.hpp"
+#include "RollUi.hpp"
 #include "layout.hpp"
 
 struct RollWidget : ModuleWidget
 {
+    RollEditor ed;
+    RollGrid* grid = nullptr;
+
     RollWidget (Roll* module)
     {
         setModule (module);
         setPanel (createPanel (asset::plugin (pluginInstance, "res/Roll.svg")));
         namespace L = layout::roll;
+        ed.m = module;
+        auto rect = [] (const float* mm) { return Rect (mm2px (Vec (mm[0], mm[1])), mm2px (Vec (mm[2], mm[3]))); };
+        grid = new RollGrid;
+        grid->ed = &ed;
+        grid->box = rect (L::ROLL_BOX);
+        addChild (grid);
+        ed.ppt = (grid->box.size.x - ROLL_KEYW) / (2.0 * BAR);   // 2 bars across
+        ed.rowH = grid->box.size.y / 36.f;                       // 3 octaves tall
         addChild (createWidget<ScrewBlack> (Vec (RACK_GRID_WIDTH, 0)));
         addChild (createWidget<ScrewBlack> (Vec (box.size.x - 2 * RACK_GRID_WIDTH, 0)));
         addChild (createWidget<ScrewBlack> (Vec (RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
