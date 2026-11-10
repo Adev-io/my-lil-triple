@@ -5,6 +5,7 @@
 using namespace rack;
 extern Plugin* pluginInstance;
 extern Model* modelTriple;
+extern Model* modelRoll;
 
 // House light colours, the same as the panel (tools/panel.py), My lil Drums, Looper and Acid Bass.
 struct LimeLight : GrayModuleLightWidget { LimeLight() { addBaseColor (nvgRGB (0xc8, 0xff, 0x3a)); } };
