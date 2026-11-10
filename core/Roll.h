@@ -141,3 +141,99 @@ struct Clock
         return true;
     }
 };
+
+struct Chan
+{
+    int key = -1;        // the note it plays (Player::key), -1 = free
+    int pitch = 60;
+    float vel = 0.f;
+    int gap = 0;         // samples of forced-low gate left (retrigger)
+    bool gate = false;
+    long age = 0;        // assignment order, for stealing the oldest
+};
+
+// Turns the tick position into up to 16 channels of pitch, gate and velocity.
+// Notes are only re-evaluated when the integer tick changes, so the per-sample cost is tiny.
+struct Player
+{
+    const Pattern* pat = nullptr;
+    Chan ch[MAX_CH];
+    int chans = 1;          // output channel count: the highest channel used, until reset
+    long last = -1;         // the tick evaluated last (absolute, since reset)
+    bool resync = true;     // next evaluation starts every note that covers the playhead
+    long ages = 0;
+
+    static int key (const Note& n) { return n.start * 128 + n.pitch; }
+    void setPattern (const Pattern* p) { pat = p; resync = true; }
+    void releaseAll() { for (Chan& c : ch) { c.key = -1; c.gate = false; c.gap = 0; } }
+    void reset() { releaseAll(); last = -1; resync = true; chans = 1; }
+    bool gateOut (int i) const { return ch[i].gate && ch[i].gap == 0; }
+    float voct (int i) const { return (ch[i].pitch - 60) / 12.f; }
+
+    // pos = clock ticks since reset. Returns true on the tick the loop wraps (EOC).
+    bool process (double pos, int gapSamples)
+    {
+        for (Chan& c : ch) if (c.gap > 0) --c.gap;
+        const long t = (long) std::floor (pos);
+        return (t != last || resync) ? evaluate (t, gapSamples) : false;
+    }
+
+    bool evaluate (long t, int gapSamples)
+    {
+        const int L = pat ? pat->ticks() : 4 * BAR;
+        const long prev = last;
+        last = t;
+        const bool eoc = prev >= 0 && t / L != prev / L;
+        const int lt = (int) (t % L), plt = prev >= 0 ? (int) (prev % L) : -1;
+        const bool all = resync || prev < 0, sameLoop = prev >= 0 && t / L == prev / L;
+        resync = false;
+
+        // notes covering the playhead (cut at the loop end); per pitch only the newest start
+        int best[128];
+        std::fill (best, best + 128, -1);
+        if (pat)
+            for (int i = 0; i < (int) pat->notes.size(); ++i)
+            {
+                const Note& n = pat->notes[i];
+                if (n.start <= lt && lt < std::min (n.start + n.len, L) && (best[n.pitch] < 0 || pat->notes[best[n.pitch]].start < n.start))
+                    best[n.pitch] = i;
+            }
+
+        bool was[MAX_CH];
+        for (int c = 0; c < MAX_CH; ++c)
+        {
+            was[c] = ch[c].gate;
+            if (ch[c].key < 0) continue;
+            const int b = best[ch[c].key % 128];
+            if (b < 0 || key (pat->notes[b]) != ch[c].key) { ch[c].key = -1; ch[c].gate = false; }
+        }
+
+        for (int p = 0; p < 128; ++p)
+        {
+            const int b = best[p];
+            if (b < 0) continue;
+            const Note& n = pat->notes[b];
+            const int k = key (n);
+            bool held = false;
+            for (const Chan& c : ch) held = held || c.key == k;
+            if (held) continue;
+            const bool fresh = all || (sameLoop ? (n.start > plt && n.start <= lt) : (n.start > plt || n.start <= lt));
+            if (! fresh) continue;   // started earlier and lost its channel to a steal: stays silent
+            int c = 0;
+            while (c < MAX_CH && ch[c].key >= 0) ++c;
+            if (c == MAX_CH)
+            {
+                c = 0;
+                for (int i = 1; i < MAX_CH; ++i) if (ch[i].age < ch[c].age) c = i;
+            }
+            ch[c].key = k;
+            ch[c].pitch = n.pitch;
+            ch[c].vel = n.vel;
+            ch[c].age = ++ages;
+            ch[c].gap = was[c] ? gapSamples : 0;   // the channel was sounding: drop the gate so envelopes re-attack
+            ch[c].gate = true;
+            chans = std::max (chans, c + 1);
+        }
+        return eoc;
+    }
+};

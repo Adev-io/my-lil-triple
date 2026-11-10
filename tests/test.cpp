@@ -14,6 +14,7 @@ int main()
     testChords();
     testRollData();
     testRollClock();
+    testRollPlayer();
     testOsc();
     testSvf();
     testVoice();

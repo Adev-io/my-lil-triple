@@ -79,3 +79,116 @@ inline void testRollClock()
     for (int i = 0; i < 48000; ++i) in.internal (120.0, dt);
     check (near (in.pos, 2.0 * PPQ * 1.0, 1e-6), "internal 120 BPM: 1 s = 2 beats", in.pos);
 }
+
+inline void testRollPlayer()
+{
+    const double dt = 1.0 / 48000.0;
+    const int gap = 48;   // 1 ms at 48 kHz
+
+    // spec test 1: 120 BPM internal clock, a note on beat 2 opens its gate at 0.5 s +- 1 sample
+    {
+        Pattern p;
+        p.add (Note (PPQ, PPQ, 60, 0.8f));
+        Clock c;
+        Player pl;
+        pl.setPattern (&p);
+        int first = -1;
+        for (int i = 0; i < 48000 && first < 0; ++i)
+        {
+            c.internal (120.0, dt);
+            pl.process (c.pos, gap);
+            if (pl.gateOut (0)) first = i;
+        }
+        check (std::abs (first - 24000) <= 1, "120 BPM: beat-2 gate opens at 0.5 s", first);
+        check (near (pl.voct (0), 0.0) && near (pl.ch[0].vel, 0.8), "C4 is 0 V, velocity passes through", pl.voct (0));
+    }
+    // spec test 3: RST mid-bar goes to tick 0 and replays the first note
+    {
+        Pattern p;
+        p.add (Note (0, 24, 60, 0.8f));
+        Clock c;
+        Player pl;
+        pl.setPattern (&p);
+        for (int i = 0; i < 14400; ++i) { c.internal (120.0, dt); pl.process (c.pos, gap); }
+        const bool offBefore = ! pl.gateOut (0);
+        c.reset();
+        pl.reset();
+        c.internal (120.0, dt);
+        pl.process (c.pos, gap);
+        check (offBefore && c.pos < 1.0 && pl.gateOut (0), "RST jumps to tick 0 and replays the first note", c.pos);
+    }
+    // spec test 4: a note crossing the loop end is cut there; EOC once per loop (10 samples per tick)
+    {
+        Pattern p;
+        p.bars = 1;
+        p.add (Note (300, 200, 60, 0.8f));
+        Player pl;
+        pl.setPattern (&p);
+        int eocs = 0;
+        bool at383 = false, at384 = true;
+        for (int i = 0; i < 9600; ++i)
+        {
+            if (pl.process (i / 10.0, gap)) ++eocs;
+            if (i == 3835) at383 = pl.gateOut (0);
+            if (i == 3845) at384 = pl.gateOut (0);
+        }
+        check (at383 && ! at384, "a note crossing the loop end is cut at the end");
+        check (eocs == 2, "EOC fires once per loop (2.5 loops)", eocs);
+    }
+    // spec test 6: 20 staggered notes, 16 channels, the newest steal the oldest (100 samples per tick)
+    {
+        Pattern p;
+        for (int k = 0; k < 20; ++k) p.add (Note (k, PPQ, 40 + k, 0.8f));
+        Player pl;
+        pl.setPattern (&p);
+        for (int i = 0; i < 2000; ++i) pl.process (i / 100.0, gap);
+        int on = 0;
+        bool newest = true;
+        for (int c = 0; c < MAX_CH; ++c)
+            if (pl.gateOut (c)) { ++on; if (pl.ch[c].pitch < 44) newest = false; }
+        check (on == 16 && newest && pl.chans == 16, "20 notes: 16 channels, newest steal oldest", on);
+    }
+    // spec test 7: back-to-back same pitch, the gate drops >= 1 ms
+    {
+        Pattern p;
+        p.add (Note (0, PPQ, 60, 0.8f));
+        p.add (Note (PPQ, PPQ, 60, 0.8f));
+        Player pl;
+        pl.setPattern (&p);
+        int low = 0;
+        bool back = false;
+        for (int i = 0; i < 9900; ++i)
+        {
+            pl.process (i / 100.0, gap);
+            if (i >= 9500 && ! pl.gateOut (0)) ++low;
+            if (i == 9890) back = pl.gateOut (0);
+        }
+        check (low >= gap && back, "same-pitch retrigger: gate low >= 1 ms, then high", low);
+    }
+    // overlapping same pitch: the newer note takes the pitch over (one channel, not two)
+    {
+        Pattern p;
+        p.add (Note (0, 2 * PPQ, 60, 0.8f));
+        p.add (Note (PPQ, PPQ, 60, 0.5f));
+        Player pl;
+        pl.setPattern (&p);
+        for (int i = 0; i < 11000; ++i) pl.process (i / 100.0, gap);
+        int on = 0;
+        for (int c = 0; c < MAX_CH; ++c) on += pl.gateOut (c) ? 1 : 0;
+        check (on == 1 && near (pl.ch[0].vel, 0.5), "newer same-pitch note wins the pitch", on);
+    }
+    // a pattern swap keeps held notes held (same start + pitch), no retrigger
+    {
+        Pattern p;
+        p.add (Note (0, BAR, 60, 0.8f));
+        Pattern q = p;
+        q.add (Note (BAR, PPQ, 64, 0.8f));
+        Player pl;
+        pl.setPattern (&p);
+        for (int i = 0; i < 1000; ++i) pl.process (i / 100.0, gap);
+        pl.setPattern (&q);
+        bool held = true;
+        for (int i = 1000; i < 1100; ++i) { pl.process (i / 100.0, gap); held = held && pl.gateOut (0); }
+        check (held, "editing while playing does not retrigger held notes");
+    }
+}
