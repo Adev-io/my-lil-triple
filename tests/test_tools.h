@@ -139,4 +139,76 @@ inline void testToolsShape()
         flip (n, s, v, c);
         check (mirrored && sorted (n) == sorted (orig), "flip vertical mirrors pitch; twice = original");
     }
+    {
+        std::vector<Note> n = { Note (0, 24, 60, 0.8f), Note (48, 12, 64, 0.5f), Note (72, 36, 67, 0.3f) };
+        const std::vector<Note> orig = n;
+        std::vector<char> s (3, 0);
+        FlipP f; f.preserveStarts = true;
+        flip (n, s, f, c);
+        n = sorted (n);
+        check (n[0].start == 0 && n[0].pitch == 67 && n[0].len == 36 && near (n[0].vel, 0.3)
+               && n[1].start == 48 && n[1].pitch == 64 && n[1].len == 12 && near (n[1].vel, 0.5)
+               && n[2].start == 72 && n[2].pitch == 60 && n[2].len == 24 && near (n[2].vel, 0.8), "flip preserve starts: slots stay, notes reverse through them");
+        flip (n, s, f, c);
+        check (sorted (n) == sorted (orig), "flip preserve starts twice = original");
+    }
+    {
+        std::vector<Note> e = { Note (10, 30, 60, 0.8f) };
+        std::vector<char> es (1, 0);
+        QuantizeP qe; qe.lenMode = END_QUANT;
+        quantize (e, es, qe, c);
+        check (e[0].start == 0 && e[0].len == 48, "quantize end: start 0, end 40 -> 48", e[0].len);
+        std::vector<Note> l = { Note (10, 30, 60, 0.8f) };
+        std::vector<char> ls (1, 0);
+        QuantizeP ql; ql.lenMode = END_LEAVE;
+        quantize (l, ls, ql, c);
+        check (l[0].start == 0 && l[0].len == 40, "quantize leave end: the end stays at 40", l[0].len);
+        std::vector<Note> h = { Note (0, 30, 60, 0.8f) };
+        std::vector<char> hs (1, 0);
+        QuantizeP qh; qh.lenMode = LEN_QUANT; qh.len = 0.5f;
+        quantize (h, hs, qh, c);
+        check (h[0].len == 27, "quantize length strength 50%: 30 -> 27", h[0].len);
+    }
+    {
+        std::vector<Note> n = { Note (0, 10, 60, 0.8f), Note (48, 10, 62, 0.8f) };
+        std::vector<char> s (2, 0);
+        articulate (n, s, articulatePreset (ART_SMALLGAP), c);
+        n = sorted (n);
+        check (n[0].len == 46 && n[1].len == 10, "articulate small gap: ends 2 ticks before the next", n[0].len);
+        std::vector<Note> k = { Note (0, 96, 60, 0.8f), Note (48, 48, 64, 0.8f) };
+        std::vector<char> ks (2, 0);
+        articulate (k, ks, articulatePreset (ART_CHOPCHORDS), c);
+        k = sorted (k);
+        check (k[0].len == 48 && k[1].len == 48, "articulate chop chords: a sounding note is cut where the next chord starts", k[0].len);
+        const std::vector<Note> orig = { Note (0, 40, 60, 0.8f), Note (48, 40, 62, 0.8f), Note (96, 40, 64, 0.8f) };
+        ArticulateP v; v.variation = 1.f; v.seed = 7; v.useLengths = true;
+        std::vector<Note> a = orig, b = orig;
+        std::vector<char> as (3, 0), bs (3, 0);
+        articulate (a, as, v, c);
+        articulate (b, bs, v, c);
+        bool shorter = true;
+        for (const Note& x : a) shorter = shorter && x.len <= 40 && x.len >= 1;
+        check (a == b && shorter, "articulate variation: same seed -> same result, never longer");
+    }
+    {
+        std::vector<Note> n = { Note (0, 24, 60, 0.8f) };
+        std::vector<char> s (1, 0);
+        rotate (n, s, c, 1);
+        check (n[0].start == 24, "rotate right moves one snap later", n[0].start);
+    }
+    {
+        std::vector<Note> n = { Note (0, 24, 60, 0.8f), Note (96, 24, 62, 0.8f) };
+        std::vector<char> s = { 0, 1 };
+        replaceScope (n, s, std::vector<int> (1, 1), { Note (48, 10, 64, 0.5f), Note (48, 20, 64, 0.9f) }, c);
+        int at48 = 0;
+        for (size_t i = 0; i < n.size(); ++i) if (n[i].start == 48) { ++at48; check (n[i].len == 20 && s[i] == 1, "replaceScope: the later output on a start+pitch wins and is selected"); }
+        check (n.size() == 2 && at48 == 1 && parallel (n, s) && s[0] == 0, "replaceScope: duplicates collapse, other notes keep their selection", (double) n.size());
+    }
+    {
+        std::vector<Note> n;
+        for (int i = 0; i < MAX_NOTES; ++i) n.push_back (Note ((i / 128) * 10, 10, i % 128, 0.8f));
+        std::vector<char> s (n.size(), 1);
+        quickQuantize (n, s, c);
+        check ((int) n.size() <= MAX_NOTES && n.size() > 0 && parallel (n, s), "4096 selected notes quantize (fast replaceScope)", (double) n.size());
+    }
 }

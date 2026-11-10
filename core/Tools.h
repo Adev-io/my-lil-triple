@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <unordered_map>
 #include <vector>
 #include "Chords.h"
 #include "Roll.h"
@@ -22,8 +23,8 @@ struct Rng   // xorshift32; same seed -> same sequence
 // Rounds half up. Every tick value that comes out of a float goes through here.
 inline int roundTicks (double v) { return (int) std::floor (v + 0.5); }
 
-// The nearest multiple of g (ties go up). v >= 0.
-inline int gridNear (int v, int g) { return (v + g / 2) / g * g; }
+// The nearest multiple of g (ties go up), also for negative v.
+inline int gridNear (int v, int g) { return (int) std::floor ((double) v / g + 0.5) * g; }
 
 // A start on the grid: rounding up past the loop end gives the last grid line inside instead.
 inline int gridStart (int v, int g, int loopTicks)
@@ -79,14 +80,16 @@ inline void replaceScope (std::vector<Note>& notes, std::vector<char>& sel, cons
     std::vector<char> keepSel;
     for (size_t i = 0; i < notes.size(); ++i)
         if (! gone[i]) { keep.push_back (notes[i]); keepSel.push_back (sel[i]); }
+    std::unordered_map<int, int> at;   // start * 128 + pitch -> index in keep
+    for (size_t i = 0; i < keep.size(); ++i) at[keep[i].start * 128 + keep[i].pitch] = (int) i;
     for (Note n : out)
     {
         clampNote (n, c);
-        bool done = false;
-        for (size_t i = 0; i < keep.size() && ! done; ++i)
-            if (keep[i].start == n.start && keep[i].pitch == n.pitch) { keep[i] = n; keepSel[i] = 1; done = true; }
-        if (done) continue;
+        const int key = n.start * 128 + n.pitch;
+        const std::unordered_map<int, int>::iterator it = at.find (key);
+        if (it != at.end()) { keep[it->second] = n; keepSel[it->second] = 1; continue; }
         if ((int) keep.size() >= MAX_NOTES) break;
+        at[key] = (int) keep.size();
         keep.push_back (n);
         keepSel.push_back (1);
     }
