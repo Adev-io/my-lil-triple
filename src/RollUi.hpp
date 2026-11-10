@@ -346,3 +346,105 @@ struct RollGrid : OpaqueWidget
         nvgRestore (vg);
     }
 };
+
+// Velocity bars under the grid, on the grid's time axis. Dragging draws a line: selected notes, or all when none are.
+struct VelLane : OpaqueWidget
+{
+    RollEditor* ed = nullptr;
+    RollGrid* grid = nullptr;
+    Vec last;
+    std::vector<Note> undoBase;
+
+    void apply (Vec a, Vec b)
+    {
+        std::vector<Note>& n = ed->notes();
+        const bool only = ed->anySel();
+        const double tol = 4.0 / ed->ppt;
+        double ta = grid->tickAt (a.x), tb = grid->tickAt (b.x);
+        float va = 1.f - a.y / box.size.y, vb = 1.f - b.y / box.size.y;
+        if (ta > tb) { std::swap (ta, tb); std::swap (va, vb); }
+        for (int i = 0; i < (int) n.size(); ++i)
+        {
+            if ((only && ! ed->sel[i]) || n[i].start < ta - tol || n[i].start > tb + tol) continue;
+            const float f = tb - ta > 1e-9 ? (float) clampd ((n[i].start - ta) / (tb - ta), 0.0, 1.0) : 0.f;
+            n[i].vel = clamp (va + (vb - va) * f, 0.f, 1.f);
+        }
+        ed->commit();
+    }
+
+    void onButton (const ButtonEvent& e) override
+    {
+        if (! ed->m || e.action != GLFW_PRESS || e.button != GLFW_MOUSE_BUTTON_LEFT) return;
+        e.consume (this);
+        ed->syncSel();
+        undoBase = ed->notes();
+        last = e.pos;
+        apply (e.pos, e.pos);
+    }
+    void onDragMove (const DragMoveEvent& e) override
+    {
+        if (! ed->m) return;
+        const Vec cur = last.plus (e.mouseDelta.div (getAbsoluteZoom()));
+        apply (last, cur);
+        last = cur;
+    }
+    void onDragEnd (const DragEndEvent& e) override { if (ed->m) ed->record (undoBase); }
+
+    void drawLayer (const DrawArgs& args, int layer) override
+    {
+        if (layer != 1) return;
+        NVGcontext* vg = args.vg;
+        const float w = box.size.x, h = box.size.y;
+        nvgSave (vg);
+        nvgScissor (vg, 0, 0, w, h);
+        nvgBeginPath (vg); nvgRect (vg, 0, 0, w, h); nvgFillColor (vg, rollCol (0x12, 0x12, 0x15)); nvgFill (vg);
+        if (ed->m)
+            for (int i = 0; i < (int) ed->notes().size(); ++i)
+            {
+                const Note& n = ed->notes()[i];
+                const float x = grid->xOf (n.start);
+                if (x < ROLL_KEYW || x > w) continue;
+                const bool on = i < (int) ed->sel.size() && ed->sel[i];
+                nvgBeginPath (vg); nvgRect (vg, x, h * (1.f - n.vel), 2.5f, h * n.vel);
+                nvgFillColor (vg, on ? rollCol (0xc8, 0xff, 0x3a) : rollCol (0x5a, 0xc8, 0xe6)); nvgFill (vg);
+            }
+        std::shared_ptr<Font> font = APP->window->loadFont (asset::system ("res/fonts/ShareTechMono-Regular.ttf"));
+        if (font && font->handle >= 0)
+        {
+            nvgFontFaceId (vg, font->handle); nvgFontSize (vg, 8.f); nvgTextAlign (vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+            nvgFillColor (vg, rollCol (0x8d, 0x8d, 0x96)); nvgText (vg, 1.f, h / 2, "VEL", nullptr);
+        }
+        nvgResetScissor (vg);
+        nvgRestore (vg);
+    }
+};
+
+// One LED-style display in the tool strip: left click = next value, right click = pick from a list.
+struct StripCell : OpaqueWidget
+{
+    std::function<std::string()> text;
+    std::function<void()> click;
+    std::function<void (Menu*)> list;
+
+    void onButton (const ButtonEvent& e) override
+    {
+        if (e.action != GLFW_PRESS) return;
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && click) { click(); e.consume (this); }
+        else if (e.button == GLFW_MOUSE_BUTTON_RIGHT && list) { list (createMenu()); e.consume (this); }
+    }
+
+    void drawLayer (const DrawArgs& args, int layer) override
+    {
+        if (layer != 1) return;
+        NVGcontext* vg = args.vg;
+        nvgBeginPath (vg); nvgRoundedRect (vg, 0, 0, box.size.x, box.size.y, 2.f);
+        nvgFillColor (vg, rollCol (0x0c, 0x0c, 0x0e)); nvgFill (vg);
+        nvgStrokeColor (vg, rollCol (0x8d, 0x8d, 0x96, 120)); nvgStrokeWidth (vg, 0.6f); nvgStroke (vg);
+        std::shared_ptr<Font> font = APP->window->loadFont (asset::system ("res/fonts/ShareTechMono-Regular.ttf"));
+        if (font && font->handle >= 0 && text)
+        {
+            nvgFontFaceId (vg, font->handle); nvgFontSize (vg, 11.f); nvgTextAlign (vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+            nvgFillColor (vg, rollCol (0xc8, 0xff, 0x3a)); nvgText (vg, box.size.x / 2, box.size.y / 2, text().c_str(), nullptr);
+        }
+    }
+};
