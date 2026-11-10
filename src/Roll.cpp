@@ -1,7 +1,7 @@
 // Roll.cpp: the My lil Roll panel widget and the model.
 // Author: Ari Klopfer / A_Development · MIT
 #include "Roll.hpp"
-#include "RollUi.hpp"
+#include "RollTools.hpp"
 #include "layout.hpp"
 
 struct RollWidget : ModuleWidget
@@ -57,8 +57,8 @@ struct RollWidget : ModuleWidget
               [=] (Menu* m) { pick (m, chordNames, [=] { return doc().chord; }, [=] (int i) { doc().chord = i; }); } },
             { [=] { return bars[doc().pat.bars - 1]; }, [=] { setBars (doc().pat.bars % 16 + 1); },
               [=] (Menu* m) { pick (m, bars, [=] { return doc().pat.bars - 1; }, [=] (int i) { setBars (i + 1); }); } },
-            { [=] { return std::string ("TOOLS"); }, nullptr,
-              [=] (Menu* m) { m->addChild (createMenuLabel ("FL tools (quantize, chop, strum...) arrive in piece 2")); } },
+            { [=] { return std::string ("TOOLS"); }, [=] { appendTools (createMenu(), e); },   // opens on left click too
+              [=] (Menu* m) { appendTools (m, e); } },
         };
         const Rect sb = rect (L::STRIP_BOX);
         const float gap = mm2px (1.2f), cw = (sb.size.x - gap * (cells.size() - 1)) / cells.size();
@@ -68,7 +68,6 @@ struct RollWidget : ModuleWidget
             c->box = Rect (Vec (sb.pos.x + i * (cw + gap), sb.pos.y), Vec (cw, sb.size.y));
             if (module) { c->text = cells[i].text; c->click = cells[i].click; c->list = cells[i].list; }
             else c->text = [=] { return std::string (i == 0 ? "DRAW" : ""); };
-            if (i == 7 && module) c->click = [=] { cells[7].list (createMenu()); };   // TOOLS opens on left click too
             addChild (c);
         }
         addChild (createWidget<ScrewBlack> (Vec (RACK_GRID_WIDTH, 0)));
@@ -89,12 +88,15 @@ struct RollWidget : ModuleWidget
         addOutput (createOutputCentered<PJ301MPort> (at (L::EOC_OUTPUT), module, Roll::EOC_OUTPUT));
     }
 
+    ~RollWidget() { endToolSession (&ed); }   // a tool submenu still open points at ed
+
     void appendContextMenu (Menu* menu) override
     {
         Roll* m = dynamic_cast<Roll*> (module);
         if (! m) return;
         RollEditor* e = &ed;
         menu->addChild (new MenuSeparator);
+        menu->addChild (createSubmenuItem ("Tools", "", [=] (Menu* sm) { appendTools (sm, e); }));
         menu->addChild (createIndexSubmenuItem ("Clock pulses per quarter", { "1", "4 (16ths)", "24", "48" },
             [=] { const int q = m->ppq; return (size_t) (q == 1 ? 0 : q == 24 ? 2 : q == 48 ? 3 : 1); },
             [=] (size_t i) { static const int Q[4] = { 1, 4, 24, 48 }; m->ppq = Q[i]; }));

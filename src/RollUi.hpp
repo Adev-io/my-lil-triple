@@ -2,6 +2,7 @@
 // Author: Ari Klopfer / A_Development · MIT
 #pragma once
 #include "Roll.hpp"
+#include "Tools.h"
 #include <climits>
 #include <functional>
 
@@ -23,6 +24,7 @@ struct RollEditor
     std::vector<Note> clip;
     int lastLen = PPQ;            // new notes take the length of the last one touched (FL)
     int seenGen = -1;             // Roll::docGen this editor state belongs to
+    bool previewing = false;      // a TOOLS submenu is previewing on the notes: the grid takes no keys
 
     std::vector<Note>& notes() { return m->doc.pat.notes; }
 
@@ -36,6 +38,7 @@ struct RollEditor
     void selectNone() { std::fill (sel.begin(), sel.end(), 0); }
     int snap() const { return SNAPS[m->doc.snap].ticks; }
     int loopTicks() const { return m->doc.pat.ticks(); }
+    ToolCtx toolCtx() const { ToolCtx c; c.loopTicks = loopTicks(); c.snap = snap(); c.key = m->doc.key; c.mode = m->doc.mode; return c; }
     void commit() { syncSel(); m->commit(); }
     void record (const std::vector<Note>& before) { if (before != notes()) hist.push (before); }   // one undo step per real change
     void undo() { if (hist.back (notes())) { sel.assign (notes().size(), 0); commit(); } }
@@ -254,6 +257,7 @@ struct RollGrid : OpaqueWidget
     void onSelectKey (const SelectKeyEvent& e) override
     {
         if (! ed->m || (e.action != GLFW_PRESS && e.action != GLFW_REPEAT)) return;
+        if (ed->previewing) { e.consume (this); return; }   // the open tool submenu owns the notes until it closes
         ed->syncSel();
         const int mods = e.mods & RACK_MOD_MASK;
         const bool ctrl = mods == RACK_MOD_CTRL, shift = mods == GLFW_MOD_SHIFT;
@@ -261,7 +265,15 @@ struct RollGrid : OpaqueWidget
         if ((ctrl && e.key == GLFW_KEY_Y) || (mods == (RACK_MOD_CTRL | GLFW_MOD_SHIFT) && e.key == GLFW_KEY_Z)) { ed->redo(); e.consume (this); return; }
         std::vector<Note>& n = ed->notes();
         const std::vector<Note> base = n;
-        if (ctrl && e.key == GLFW_KEY_A) std::fill (ed->sel.begin(), ed->sel.end(), 1);
+        const ToolCtx tc = ed->toolCtx();
+        if (shift && e.key == GLFW_KEY_Q) quickQuantizeStarts (n, ed->sel, tc);   // never Ctrl+Q: it quits Rack
+        else if (ctrl && e.key == GLFW_KEY_U) quickChop (n, ed->sel, tc);
+        else if (ctrl && e.key == GLFW_KEY_L) quickLegato (n, ed->sel, tc);
+        else if (ctrl && e.key == GLFW_KEY_G) glue (n, ed->sel, tc);
+        else if (shift && e.key == GLFW_KEY_D) discardLengths (n, ed->sel, tc);
+        else if (mods == (RACK_MOD_CTRL | GLFW_MOD_SHIFT) && (e.key == GLFW_KEY_LEFT || e.key == GLFW_KEY_RIGHT))
+            rotate (n, ed->sel, tc, e.key == GLFW_KEY_RIGHT ? 1 : -1);
+        else if (ctrl && e.key == GLFW_KEY_A) std::fill (ed->sel.begin(), ed->sel.end(), 1);
         else if (ctrl && e.key == GLFW_KEY_C) copy();
         else if (ctrl && e.key == GLFW_KEY_V) paste();
         else if (mods == 0 && (e.key == GLFW_KEY_DELETE || e.key == GLFW_KEY_BACKSPACE))
