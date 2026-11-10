@@ -19,6 +19,7 @@ int main()
     testToolsQuick();
     testToolsShape();
     testToolsTime();
+    testToolsLevels();
     testOsc();
     testSvf();
     testVoice();

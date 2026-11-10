@@ -452,3 +452,166 @@ inline void flam (std::vector<Note>& notes, std::vector<char>& sel, const FlamP&
     graces.insert (graces.end(), mains.begin(), mains.end());
     replaceScope (notes, sel, idx, graces, c);
 }
+
+// ---- limit, randomize, scale levels, velocity LFO ----
+
+enum { FIX_OFF, FIX_ABOVE, FIX_BELOW, FIX_ALT };
+struct LimitP { int low = 48, high = 72; bool wrap = false; int scaleFix = FIX_OFF; };
+struct RandomizeP { bool levels = true; float velAmount = 0.2f; bool bipolar = true; bool pattern = false; float population = 0.5f;
+                    int stack = 1, octave = 4, range = 1; float lenVar = 0.f; bool merge = true; int seed = 1; };
+struct ScaleLevelsP { float center = 0.f, multiply = 1.f, tension = 0.f, offset = 0.f; };   // center/tension -100..100, offset -1..1
+enum { LFO_SINE, LFO_TRI, LFO_SQUARE };
+struct LfoP { int shape = LFO_SINE; float cycles = 1.f, phase = 0.f, depth = 0.5f, center = 0.5f; };   // phase in degrees
+
+// Moves p by whole octaves into [lo, hi]. Returns false when the range holds no pitch of that pitch class.
+inline bool octaveInto (int p, int lo, int hi, bool wrap, int& out)
+{
+    if (p >= lo && p <= hi) { out = p; return true; }
+    if (p < lo) out = wrap ? hi - ((hi - p) % 12) : p + 12 * ((lo - p + 11) / 12);
+    else out = wrap ? lo + ((p - lo) % 12) : p - 12 * ((p - hi + 11) / 12);
+    return out >= lo && out <= hi;
+}
+
+// Pitches outside low..high move by octaves into it (wrap: to the opposite end's octave). A pitch class the range
+// can't hold (range under 12 semitones) is clamped to the nearer edge. Scale fix then moves off-scale notes one
+// semitone at a time (alternate: above, below, above ... in start/pitch order); if that leaves the range, the other
+// direction is tried, then the note stays.
+inline void limit (std::vector<Note>& notes, std::vector<char>& sel, const LimitP& p, const ToolCtx& c)
+{
+    std::vector<int> idx = scope (sel, (int) notes.size());
+    std::sort (idx.begin(), idx.end(), [&notes] (int a, int b)
+    {
+        return notes[a].start != notes[b].start ? notes[a].start < notes[b].start : notes[a].pitch < notes[b].pitch;
+    });
+    const int lo = std::max (0, std::min (std::min (p.low, p.high), 127)), hi = std::max (0, std::min (std::max (p.low, p.high), 127));
+    int altCount = 0;
+    std::vector<Note> out;
+    for (int i : idx)
+    {
+        Note n = notes[i];
+        int q;
+        if (octaveInto (n.pitch, lo, hi, p.wrap, q)) n.pitch = q;
+        else n.pitch = n.pitch < lo ? lo : hi;
+        if (p.scaleFix != FIX_OFF && ! inScale (n.pitch, c.key, c.mode))
+        {
+            const int first = p.scaleFix == FIX_ABOVE ? 1 : p.scaleFix == FIX_BELOW ? -1 : (altCount++ % 2 == 0 ? 1 : -1);
+            for (int d : { first, -first })
+            {
+                int x = n.pitch + d;
+                while (x >= lo && x <= hi && ! inScale (x, c.key, c.mode)) x += d;
+                if (x >= lo && x <= hi) { n.pitch = x; break; }
+            }
+        }
+        out.push_back (n);
+    }
+    replaceScope (notes, sel, idx, out, c);
+}
+
+// Levels: every scope note's velocity moves by up to velAmount (bipolar) or down by up to it.
+// Pattern: fills the selection's time span (the whole loop when nothing is selected) with random in-scale notes: one
+// roll per snap step for population, then a pitch and a length roll per stacked note. New notes never overwrite
+// existing ones. Needs snap > 1.
+inline void randomize (std::vector<Note>& notes, std::vector<char>& sel, const RandomizeP& p, const ToolCtx& c)
+{
+    const std::vector<int> idx = scope (sel, (int) notes.size());
+    Rng rng ((uint32_t) p.seed);
+    std::vector<Note> out;
+    if (p.levels)
+        for (int i : idx)
+        {
+            Note n = notes[i];
+            const double u = rng.uni();
+            n.vel = (float) (n.vel + p.velAmount * (p.bipolar ? 2.0 * u - 1.0 : -u));
+            out.push_back (n);
+        }
+    if (p.pattern && c.snap > 1)
+    {
+        bool any = false;
+        int A = c.loopTicks, B = 0;
+        for (size_t i = 0; i < notes.size() && i < sel.size(); ++i)
+            if (sel[i]) { any = true; A = std::min (A, notes[i].start); B = std::max (B, notes[i].start + notes[i].len); }
+        if (! any) { A = 0; B = c.loopTicks; }
+        B = std::min (B, c.loopTicks);
+        std::vector<int> pool;
+        const int base = (p.octave + 1) * 12;
+        for (int q = base; q < base + 12 * std::max (1, std::min (p.range, 3)) && q <= 127; ++q)
+            if (q >= 0 && inScale (q, c.key, c.mode)) pool.push_back (q);
+        std::unordered_map<int, char> taken;   // start * 128 + pitch of every existing note
+        for (const Note& n : notes) taken[n.start * 128 + n.pitch] = 1;
+        std::vector<Note> gen;
+        for (int t = A; t < B && ! pool.empty(); t += c.snap)
+        {
+            if (rng.uni() >= p.population) continue;
+            for (int s = 0; s < std::max (1, std::min (p.stack, 4)); ++s)
+            {
+                const int pitch = pool[std::min ((int) pool.size() - 1, (int) (rng.uni() * pool.size()))];
+                const double u = rng.uni();
+                int len = c.snap;
+                if (p.lenVar > 0.f) len = c.snap * (1 + (int) std::floor (u * 4.0 * p.lenVar));
+                else if (p.lenVar < 0.f) len = std::max (1, roundTicks (c.snap * (1.0 - u * -p.lenVar * 0.75)));
+                if (taken.count (t * 128 + pitch)) continue;
+                taken[t * 128 + pitch] = 1;
+                gen.push_back (Note (t, len, pitch, 0.8f));
+            }
+        }
+        if (p.merge)
+        {
+            std::sort (gen.begin(), gen.end(), [] (const Note& a, const Note& b)
+            {
+                return a.pitch != b.pitch ? a.pitch < b.pitch : a.start < b.start;
+            });
+            std::vector<Note> merged;
+            for (const Note& n : gen)
+            {
+                if (! merged.empty() && merged.back().pitch == n.pitch && merged.back().start + merged.back().len == n.start) merged.back().len += n.len;
+                else merged.push_back (n);
+            }
+            gen.swap (merged);
+        }
+        out.insert (out.end(), gen.begin(), gen.end());
+    }
+    replaceScope (notes, sel, p.levels ? idx : std::vector<int>(), out, c);
+}
+
+// v' = pivot + (v - pivot) x multiply, then v^(2^(-tension/50)), then + offset, clamped 0..1. pivot = 0.5 + center/200.
+inline void scaleLevels (std::vector<Note>& notes, std::vector<char>& sel, const ScaleLevelsP& p, const ToolCtx& c)
+{
+    const std::vector<int> idx = scope (sel, (int) notes.size());
+    const double pivot = 0.5 + p.center / 200.0;
+    std::vector<Note> out;
+    for (int i : idx)
+    {
+        Note n = notes[i];
+        double v = pivot + (n.vel - pivot) * p.multiply;
+        v = std::max (0.0, std::min (1.0, v));
+        if (p.tension != 0.f) v = std::pow (v, std::pow (2.0, -p.tension / 50.0));
+        n.vel = (float) (v + p.offset);
+        out.push_back (n);
+    }
+    replaceScope (notes, sel, idx, out, c);
+}
+
+// vel = center + depth/2 x wave, the wave read at each note's start across the scope's span (cycles per span, phase in
+// degrees). A span of zero length changes nothing.
+inline void velocityLfo (std::vector<Note>& notes, std::vector<char>& sel, const LfoP& p, const ToolCtx& c)
+{
+    const std::vector<int> idx = scope (sel, (int) notes.size());
+    if (idx.empty()) return;
+    int A = notes[idx[0]].start, B = A;
+    for (int i : idx) { A = std::min (A, notes[i].start); B = std::max (B, notes[i].start + notes[i].len); }
+    if (B <= A) return;
+    const double twoPi = 6.283185307179586;
+    std::vector<Note> out;
+    for (int i : idx)
+    {
+        Note n = notes[i];
+        const double phi = p.cycles * (double) (n.start - A) / (B - A) + p.phase / 360.0;
+        double w;
+        if (p.shape == LFO_SQUARE) w = phi - std::floor (phi) < 0.5 ? 1.0 : -1.0;
+        else if (p.shape == LFO_TRI) w = 4.0 / twoPi * std::asin (std::sin (twoPi * phi));
+        else w = std::sin (twoPi * phi);
+        n.vel = (float) (p.center + p.depth / 2.0 * w);
+        out.push_back (n);
+    }
+    replaceScope (notes, sel, idx, out, c);
+}

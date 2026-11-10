@@ -351,3 +351,145 @@ inline void testToolsTime()
         check (t.size() == 2 && t[1].start == 108 && t[1].len == 1, "flam after: the delayed note keeps at least 1 tick", t[1].len);
     }
 }
+
+inline void testToolsLevels()
+{
+    ToolCtx c;
+    c.key = 0; c.mode = 0;   // C major
+    {
+        std::vector<Note> n = { Note (0, 24, 30, 0.8f), Note (24, 24, 61, 0.8f), Note (48, 24, 100, 0.8f) };
+        std::vector<char> s (3, 0);
+        LimitP p; p.scaleFix = FIX_ABOVE;
+        limit (n, s, p, c);
+        bool ok = true;
+        for (const Note& x : n) ok = ok && x.pitch >= 48 && x.pitch <= 72 && inScale (x.pitch, 0, 0);
+        check (ok, "limit: every pitch inside C3..C5 and in C major");
+    }
+    {
+        std::vector<Note> a = { Note (0, 24, 60, 0.5f), Note (24, 24, 62, 0.5f), Note (48, 24, 64, 0.5f) }, b = a;
+        std::vector<char> sa (3, 0), sb (3, 0);
+        RandomizeP r; r.velAmount = 1.f;
+        randomize (a, sa, r, c);
+        randomize (b, sb, r, c);
+        bool range = true;
+        for (const Note& x : a) range = range && x.vel >= 0.f && x.vel <= 1.f;
+        check (a == b && range, "randomize: same seed, same result; velocity stays 0..1");
+        std::vector<Note> e;
+        std::vector<char> es;
+        RandomizeP g; g.levels = false; g.pattern = true; g.population = 1.f;
+        randomize (e, es, g, c);
+        bool inKey = ! e.empty();
+        for (const Note& x : e) inKey = inKey && inScale (x.pitch, 0, 0) && x.pitch >= 60 && x.pitch < 72;
+        check (inKey && parallel (e, es), "randomize pattern: in-scale notes in the chosen octave", (double) e.size());
+    }
+    {
+        std::vector<Note> n = { Note (0, 24, 60, 0.2f), Note (24, 24, 62, 0.9f) };
+        const std::vector<Note> before = n;
+        std::vector<char> s (2, 0);
+        ScaleLevelsP id;
+        scaleLevels (n, s, id, c);
+        check (n == before, "scale levels at defaults changes nothing");
+        ScaleLevelsP half; half.multiply = 0.5f;
+        scaleLevels (n, s, half, c);
+        check (near (n[0].vel, 0.35, 1e-5) && near (n[1].vel, 0.7, 1e-5), "scale levels multiply 50% about 0.5");
+    }
+    {
+        std::vector<Note> n = { Note (0, 96, 60, 0.5f), Note (96, 96, 60, 0.5f), Note (192, 96, 60, 0.5f), Note (288, 96, 60, 0.5f) };
+        std::vector<char> s (4, 0);
+        LfoP sq; sq.shape = LFO_SQUARE; sq.cycles = 2.f; sq.depth = 1.f;
+        velocityLfo (n, s, sq, c);
+        n = sorted (n);
+        check (near (n[0].vel, 1.0) && near (n[1].vel, 0.0) && near (n[2].vel, 1.0) && near (n[3].vel, 0.0), "square LFO alternates full and zero");
+    }
+    {   // edge cases
+        std::vector<Note> n = { Note (0, 24, 71, 0.8f), Note (24, 24, 72, 0.8f), Note (48, 24, 30, 0.8f) };
+        std::vector<char> s (3, 0);
+        LimitP nar; nar.low = 60; nar.high = 64;   // only pitch classes C..E fit
+        limit (n, s, nar, c);
+        n = sorted (n);
+        check (n[0].pitch == 64 && n[1].pitch == 60 && n[2].pitch == 60 && parallel (n, s),
+               "limit under 12 semitones: a pitch class that cannot fit clamps to the nearer edge", n[0].pitch);   // B (71) has no home in 60..64 -> high edge 64; C (72) -> 60; F# (30) -> low edge 60
+        std::vector<Note> w = { Note (0, 24, 30, 0.8f), Note (24, 24, 100, 0.8f), Note (48, 24, 60, 0.8f) };
+        std::vector<char> ws (3, 0);
+        LimitP wrap; wrap.wrap = true;
+        limit (w, ws, wrap, c);
+        w = sorted (w);
+        check (w[0].pitch == 66 && w[1].pitch == 52 && w[2].pitch == 60, "limit wrap: out-of-range notes land in the opposite end's octave", w[0].pitch);   // F#1 -> F#4 (66), E7 (100) -> E3 (52)
+        std::vector<Note> f = { Note (0, 24, 61, 0.8f), Note (24, 24, 63, 0.8f), Note (48, 24, 66, 0.8f) };
+        std::vector<char> fs (3, 0);
+        LimitP alt; alt.scaleFix = FIX_ALT;
+        limit (f, fs, alt, c);
+        f = sorted (f);
+        check (f[0].pitch == 62 && f[1].pitch == 62 && f[2].pitch == 67, "limit scale fix alternate: above, below, above", f[1].pitch);   // C# -> D, D# -> D, F# -> G
+        std::vector<Note> ed = { Note (0, 24, 70, 0.8f) };
+        std::vector<char> eds (1, 0);
+        LimitP edge; edge.high = 70; edge.scaleFix = FIX_ABOVE;   // A# is off scale; above leaves the range, so it goes below
+        limit (ed, eds, edge, c);
+        check (ed[0].pitch == 69, "limit scale fix never leaves the range", ed[0].pitch);
+
+        std::vector<Note> off;
+        std::vector<char> offs;
+        ToolCtx nosnap = c; nosnap.snap = 1;
+        RandomizeP g; g.levels = false; g.pattern = true; g.population = 1.f;
+        randomize (off, offs, g, nosnap);
+        check (off.empty(), "randomize pattern with snap OFF does nothing");
+        std::vector<Note> p1, p2;
+        std::vector<char> ps1, ps2;
+        RandomizeP full; full.levels = false; full.pattern = true; full.stack = 3; full.range = 2; full.lenVar = 1.f; full.seed = 9;
+        randomize (p1, ps1, full, c);
+        randomize (p2, ps2, full, c);
+        bool ok = ! p1.empty() && p1 == p2 && p1.size() == ps1.size();
+        for (const Note& x : p1) ok = ok && inScale (x.pitch, 0, 0) && x.pitch >= 60 && x.pitch < 84 && x.len >= 24 && near (x.vel, 0.8, 1e-5);
+        check (ok, "randomize pattern: stack, range and length variation are seeded and in scale", (double) p1.size());
+        std::vector<Note> m = { Note (0, 96, 60, 0.5f), Note (96, 96, 62, 0.5f) };
+        std::vector<char> ms = { 1, 0 };
+        RandomizeP span; span.levels = false; span.pattern = true; span.population = 1.f;
+        randomize (m, ms, span, c);
+        bool within = m.size() > 2;
+        for (const Note& x : m)
+            if (! (x.start == 0 && x.len == 96 && x.pitch == 60) && ! (x.start == 96 && x.pitch == 62)) within = within && x.start < 96 && x.start % 24 == 0;
+        check (within && m.size() == ms.size(), "randomize pattern: fills only the selection's span, existing notes survive", (double) m.size());
+        RandomizeP down; down.bipolar = false; down.velAmount = 0.3f;
+        std::vector<Note> d = { Note (0, 24, 60, 0.5f), Note (24, 24, 62, 0.5f), Note (48, 24, 64, 0.5f) };
+        std::vector<char> dsel (3, 0);
+        randomize (d, dsel, down, c);
+        bool lower = true;
+        for (const Note& x : d) lower = lower && x.vel <= 0.5f + 1e-6f && x.vel >= 0.2f - 1e-6f;
+        check (lower, "randomize levels, not bipolar: velocities only go down");
+
+        std::vector<Note> sl = { Note (0, 24, 60, 0.5f) };
+        std::vector<char> sls (1, 0);
+        ScaleLevelsP off2; off2.offset = 0.7f;
+        scaleLevels (sl, sls, off2, c);
+        check (near (sl[0].vel, 1.0), "scale levels offset clamps at 1", sl[0].vel);
+        ScaleLevelsP ten; ten.tension = 50.f;   // v^(2^-1) = sqrt
+        std::vector<Note> t = { Note (0, 24, 60, 0.25f) };
+        std::vector<char> tsel (1, 0);
+        scaleLevels (t, tsel, ten, c);
+        check (near (t[0].vel, 0.5, 1e-5), "scale levels tension 50 = square root curve", t[0].vel);
+
+        std::vector<Note> z = { Note (0, 0, 60, 0.5f) };
+        const std::vector<Note> zb = z;
+        std::vector<char> zs (1, 0);
+        velocityLfo (z, zs, LfoP(), c);
+        check (z == zb, "LFO with span B <= A changes nothing");
+        std::vector<Note> sn = { Note (0, 96, 60, 0.5f), Note (96, 96, 60, 0.5f), Note (192, 96, 60, 0.5f) };
+        std::vector<char> sns (3, 0);
+        LfoP sine; sine.cycles = 1.f; sine.depth = 1.f; sine.phase = 90.f;   // cos at the start: 1, then -0.5, -0.5
+        velocityLfo (sn, sns, sine, c);
+        sn = sorted (sn);
+        check (near (sn[0].vel, 1.0, 1e-5) && near (sn[1].vel, 0.25, 1e-4), "sine LFO with 90 degrees phase starts at the top", sn[1].vel);   // 0.5 + 0.5 x cos (2pi/3) = 0.25
+        std::vector<Note> tr = { Note (0, 96, 60, 0.5f), Note (96, 96, 60, 0.5f), Note (192, 96, 60, 0.5f), Note (288, 96, 60, 0.5f) };
+        std::vector<char> trs (4, 0);
+        LfoP tri; tri.shape = LFO_TRI; tri.depth = 1.f;
+        velocityLfo (tr, trs, tri, c);
+        tr = sorted (tr);
+        check (near (tr[0].vel, 0.5, 1e-5) && near (tr[1].vel, 1.0, 1e-5) && near (tr[2].vel, 0.5, 1e-5) && near (tr[3].vel, 0.0, 1e-5), "triangle LFO: mid, top, mid, bottom", tr[1].vel);
+        std::vector<Note> part = { Note (0, 96, 60, 0.5f), Note (96, 96, 60, 0.5f), Note (192, 96, 60, 0.5f) };
+        std::vector<char> ps = { 0, 1, 1 };
+        LfoP sqr; sqr.shape = LFO_SQUARE; sqr.depth = 1.f;
+        velocityLfo (part, ps, sqr, c);
+        part = sorted (part);
+        check (near (part[0].vel, 0.5) && near (part[1].vel, 1.0) && near (part[2].vel, 0.0), "LFO spans only the selection; unselected notes untouched", part[2].vel);
+    }
+}
