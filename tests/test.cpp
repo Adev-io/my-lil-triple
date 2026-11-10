@@ -13,6 +13,7 @@ int main()
     testAdsr();
     testChords();
     testRollData();
+    testRollClock();
     testOsc();
     testSvf();
     testVoice();

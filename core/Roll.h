@@ -113,3 +113,31 @@ struct History
         return true;
     }
 };
+
+// Tick position from the internal tempo, or from clock pulses with smooth ticks in between.
+struct Clock
+{
+    double pos = 0.0;          // ticks since reset
+    int ppq = 4;               // external pulses per quarter note: 1, 4, 24 or 48
+    bool started = false;      // a pulse has arrived since reset
+    double base = 0.0;         // tick of the last pulse
+    double since = 0.0, interval = 0.0;   // seconds since the last pulse, and between the last two
+
+    void reset() { pos = 0.0; started = false; base = 0.0; since = 0.0; interval = 0.0; }
+    void internal (double bpm, double dt) { pos += bpm / 60.0 * PPQ * dt; }
+    // Returns false while stopped: no pulse since reset, or none for 2x the last interval.
+    bool external (bool pulse, double dt)
+    {
+        const double step = (double) PPQ / ppq;
+        since += dt;
+        if (pulse)
+        {
+            if (started) { base += step; interval = since; }
+            started = true;
+            since = 0.0;
+        }
+        if (! started || (interval > 0.0 && since > 2.0 * interval)) return false;
+        pos = base + (interval > 0.0 ? std::min (since / interval, 0.999) : 0.0) * step;   // never runs past the next pulse
+        return true;
+    }
+};

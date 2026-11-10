@@ -49,3 +49,33 @@ inline void testRollData()
         check (deep.undo.size() == 64, "undo depth is 64", (double) deep.undo.size());
     }
 }
+
+inline void testRollClock()
+{
+    const double dt = 1.0 / 48000.0;
+    // spec test 2: PPQN 4, a pulse every 1200 samples (= 16ths at 150 BPM)
+    Clock c;
+    c.ppq = 4;
+    double mid = -1;
+    for (int k = 0; k < 17; ++k)
+    {
+        c.external (true, dt);
+        if (k == 16) break;
+        for (int i = 0; i < 1199; ++i)
+        {
+            c.external (false, dt);
+            if (k == 1 && i == 599) mid = c.pos;
+        }
+    }
+    check (near (c.pos, 384.0, 1e-9), "PPQN 4: 16 clock intervals advance exactly 1 bar", c.pos);
+    check (near (mid, 36.0, 0.1), "ticks fill in smoothly between pulses", mid);
+    bool going = true;
+    for (int i = 0; i < 2500; ++i) going = c.external (false, dt);
+    check (! going, "a stalled clock reports stopped");
+
+    Clock n;
+    check (! n.external (false, dt), "no pulse yet since reset: stopped");
+    Clock in;
+    for (int i = 0; i < 48000; ++i) in.internal (120.0, dt);
+    check (near (in.pos, 2.0 * PPQ * 1.0, 1e-6), "internal 120 BPM: 1 s = 2 beats", in.pos);
+}
