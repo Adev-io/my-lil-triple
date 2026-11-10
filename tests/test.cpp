@@ -6,6 +6,7 @@
 #include "test_roll.h"
 #include "test_osc.h"
 #include "test_svf.h"
+#include "test_tools.h"
 #include "test_voice.h"
 
 int main()
@@ -15,6 +16,7 @@ int main()
     testRollData();
     testRollClock();
     testRollPlayer();
+    testToolsQuick();
     testOsc();
     testSvf();
     testVoice();
