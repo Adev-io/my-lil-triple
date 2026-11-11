@@ -19,7 +19,7 @@ inline void testHarmony()
     check (snap (64, EPHR) == 64 && snap (66, EPHR) == 65, "snap keeps scale notes, F# -> F");
     check (snap (71, FMAJ) == 70, "B over Gm snaps to Bb");
 
-    int v[4];
+    int v[6];
     check (voices (64, H_BELOW, Em, EPHR, v) == 2 && v[1] == 59, "E4 over Em: 3rd below = B3");
     check (voices (74, H_BELOW, Gm, FMAJ, v) == 2 && v[1] == 70, "D5 over Gm: 3rd below = Bb4");
     check (voices (65, H_BELOW, Em, EPHR, v) == 2 && v[1] == 62, "passing F4 over Em harmonises in the scale: D4");
@@ -68,4 +68,44 @@ inline void testHarmony()
     vo[2] = 10 / 12.f; vo[3] = 2 / 12.f + 1.f; vo[4] = 7 / 12.f + 1.f; g[2] = g[3] = g[4] = 10.f;   // Gm starts over them
     run (5, 0.05f);
     check (f.chord == Gm, "the newest stab wins over notes still ringing");
+
+    // chord colors (bank B pads) and pad decoding
+    int w[6];
+    check (chordRoot (Em) == 4 && chordRoot (Bb) == 10 && chordRoot (0) == -1, "chord roots: Em = E, Bb = Bb, none = -1");
+    check (padIndex ((36 - 60) / 12.f) == 0 && padIndex ((43 - 60) / 12.f) == 7, "bank A pads 36-43 -> 0-7");
+    check (padIndex ((44 - 60) / 12.f) == 8 && padIndex ((51 - 60) / 12.f) == 15, "bank B pads 44-51 -> 8-15");
+    check (padIndex ((35 - 60) / 12.f) == -1 && padIndex ((52 - 60) / 12.f) == -1, "notes outside the pads are ignored");
+    auto is = [&] (int n, std::initializer_list<int> l) { if (n != (int) l.size()) return false; int i = 0; for (int p : l) if (w[i++] != p) return false; return true; };
+    check (is (colorVoices (64, C_SEVENTH, Em, EPHR, 4, w), { 64, 59, 55, 50 }), "E4 over Em, 7th: E4 B3 G3 D3");
+    check (is (colorVoices (64, C_ADDB9, Em, EPHR, 4, w), { 64, 59, 55, 53 }), "E4 over Em, add b9: E4 B3 G3 F3");
+    check (is (colorVoices (64, C_SUS4, Em, EPHR, 4, w), { 64, 59, 45 }), "E4 over Em, sus4: E B A, no G");
+    check (is (colorVoices (65, C_SUS4, F, EPHR, 4, w), { 65, 60, 55 }), "F4 over F, sus4 falls back to sus2: F C G");
+    check (is (colorVoices (64, C_TRIAD, 0, EPHR, 4, w), { 64, 59, 55 }), "no chord yet: triad on the key root");
+
+    // every color over every song chord: in the chord scale, lead on top, the right voice count, gap-3 colors never rub
+    static const int COLOR_N[C_N] = { 1, 3, 4, 5, 6, 4, 3, 3, 4, 4, 3, 3, 3, 4 };
+    bool cIn = true, cTop = true, cN = true, cRub = true;
+    for (Mask c : chords)
+    {
+        const Mask s = chordScale (EPHR, c);
+        for (int key = 40; key <= 90; ++key)
+            for (int col = 1; col < C_N; ++col)
+            {
+                const int lead = snap (key, s);
+                const int n = colorVoices (lead, col, c, s, 4, w);
+                cN = cN && n == COLOR_N[col];
+                const bool mayRub = col == C_CLUSTER || col == C_ADDB9 || col == C_SUS2 || col == C_SUS4;   // sus4 may fall back to sus2
+                for (int i = 0; i < n; ++i)
+                {
+                    cIn = cIn && (s & bit (w[i]));
+                    cTop = cTop && (i == 0 ? w[0] == lead : w[i] < lead);
+                    if (! mayRub)
+                        for (int j = i + 1; j < n; ++j) { const int d = std::abs (w[i] - w[j]); cRub = cRub && d != 1 && d != 2; }
+                }
+            }
+    }
+    check (cIn, "every color voice stays in the chord scale");
+    check (cTop, "the lead is always the top voice");
+    check (cN, "every color has its voice count");
+    check (cRub, "gap-3 colors never put voices a semitone or a tone apart");
 }
