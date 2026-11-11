@@ -111,11 +111,13 @@ HX = [14.0, 31.0, 48.0, 65.0]
 HARMONY = dict(name='harmony', svg='Harmony.svg', title='MY LIL HARMONY', w=HARM_W, block=(86, 40), layout=[
     ('KEY_PARAM', 'knob', HX[0], 28, 'KEY'), ('MODE_PARAM', 'knob', HX[1], 28, 'MODE'),
     ('HARM_PARAM', 'knob', HX[2], 28, 'HARMONY'), ('GLIDE_PARAM', 'knob', HX[3], 28, 'GLIDE'),
-    ('SNAP_PARAM', 'button', HX[0], 50, 'CHORD ONLY'),
+    ('COLOR_PARAM', 'knob', HX[0], 50, 'COLOR'), ('SET_PARAM', 'knob', HX[0], 70, 'SET'),
+    ('SNAP_PARAM', 'button', HX[0], 84, 'CHORD ONLY'),
     ('VOCT_INPUT', 'play', HX[0], 96, 'V/OCT'), ('GATE_INPUT', 'play', HX[1], 96, 'GATE'),
     ('CHORD_INPUT', 'seq', HX[2], 96, 'CHORD'), ('CHGATE_INPUT', 'seq', HX[3], 96, 'CH GATE'),
+    ('PADS_INPUT', 'cv', HX[0], 115, 'PADS'), ('PADGATE_INPUT', 'cv', HX[1], 115, 'PAD GATE'),
     ('VOCT_OUTPUT', 'out', HX[2], 115, 'V/OCT'), ('GATE_OUTPUT', 'out', HX[3], 115, 'GATE'),
-], captions=[('LEAD IN', HX[0], 96), ('ROLL IN', HX[2], 96)], boxes=[('DISPLAY_BOX', 24.0, 44.0, HARM_W - 28, 34.0)])
+], captions=[('LEAD IN', HX[0], 96), ('ROLL IN', HX[2], 96), ('PADS IN', HX[0], 115)], boxes=[('DISPLAY_BOX', 24.0, 44.0, HARM_W - 28, 34.0)])
 
 PANELS = (TRIPLE, ROLL, HARMONY)
 

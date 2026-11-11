@@ -11,11 +11,9 @@ static const char* const FLAT_NAMES[12] = { "C", "Db", "D", "Eb", "E", "F", "Gb"
 static std::string chordName (Mask m)
 {
     if (! m) return "-";
-    static const struct { int a, b; const char* s; } T[] = { { 4, 7, "" }, { 3, 7, "m" }, { 3, 6, "dim" }, { 4, 8, "aug" }, { 5, 7, "sus4" }, { 2, 7, "sus2" } };
-    for (const auto& t : T)
-        for (int r = 0; r < 12; ++r)
-            if (has (m, r) && has (m, r + t.a) && has (m, r + t.b) && __builtin_popcount (m) <= 4)
-                return std::string (FLAT_NAMES[r]) + t.s;
+    const char* suffix = "";
+    const int r = chordRoot (m, &suffix);
+    if (r >= 0) return std::string (FLAT_NAMES[r]) + suffix;
     std::string s;
     for (int p = 0; p < 12; ++p) if (has (m, p)) s += std::string (s.empty() ? "" : " ") + FLAT_NAMES[p];
     return s;
@@ -23,17 +21,18 @@ static std::string chordName (Mask m)
 
 struct Harmony : Module
 {
-    enum ParamId { KEY_PARAM, MODE_PARAM, HARM_PARAM, GLIDE_PARAM, SNAP_PARAM, PARAMS_LEN };
-    enum InputId { VOCT_INPUT, GATE_INPUT, CHORD_INPUT, CHGATE_INPUT, INPUTS_LEN };
+    enum ParamId { KEY_PARAM, MODE_PARAM, HARM_PARAM, GLIDE_PARAM, SNAP_PARAM, COLOR_PARAM, SET_PARAM, PARAMS_LEN };
+    enum InputId { VOCT_INPUT, GATE_INPUT, CHORD_INPUT, CHGATE_INPUT, PADS_INPUT, PADGATE_INPUT, INPUTS_LEN };
     enum OutputId { VOCT_OUTPUT, GATE_OUTPUT, OUTPUTS_LEN };
     enum LightId { SNAP_LIGHT, LIGHTS_LEN };
 
     ChordFollower follow;
-    float y[4] = {};
+    float y[6] = {};
     int lastN = 0;
+    dsp::SchmittTrigger padTrig;
     // read by the display
     Mask shownChord = 0, shownScale = 0;
-    int shownVoices[4] = {}, shownN = 0;
+    int shownVoices[6] = {}, shownN = 0;
 
     Harmony()
     {
@@ -43,6 +42,10 @@ struct Harmony : Module
         configSwitch (HARM_PARAM, 0.f, H_N - 1, H_BELOW, "Harmony", std::vector<std::string> (HARMONY_NAMES, HARMONY_NAMES + H_N));
         configParam (GLIDE_PARAM, 0.f, 1.f, 0.f, "Glide", " ms", 0.f, 500.f);
         configSwitch (SNAP_PARAM, 0.f, 1.f, 0.f, "Lead snap", { "Scale (free solo)", "Chord tones only" });
+        configSwitch (COLOR_PARAM, 0.f, 8.f, 0.f, "Chord color (bank B pad)", { "Off (line mode)", "1", "2", "3", "4", "5", "6", "7", "8" });
+        configSwitch (SET_PARAM, 0.f, 2.f, 0.f, "Color set", { "Dark", "Lush", "Mix" });
+        configInput (PADS_INPUT, "Pads V/OCT (MIDI-CV on channel 10)");
+        configInput (PADGATE_INPUT, "Pads gate");
         configInput (VOCT_INPUT, "Lead V/OCT (e.g. MIDI-CV)");
         configInput (GATE_INPUT, "Lead gate");
         configInput (CHORD_INPUT, "Chord V/OCT (poly, e.g. My lil Roll V/OCT)");
@@ -53,6 +56,12 @@ struct Harmony : Module
 
     void process (const ProcessArgs& a) override
     {
+        if (padTrig.process (inputs[PADGATE_INPUT].getVoltage(), 0.1f, 1.f))
+        {
+            const int pad = padIndex (inputs[PADS_INPUT].getVoltage());
+            if (pad >= 0 && pad < 8) { params[HARM_PARAM].setValue (pad); params[COLOR_PARAM].setValue (0.f); }   // bank A: line mode
+            else if (pad >= 8) params[COLOR_PARAM].setValue (pad - 7);                                            // bank B: chord color
+        }
         Mask chord = 0;
         if (inputs[CHORD_INPUT].isConnected())
         {
@@ -71,8 +80,11 @@ struct Harmony : Module
         const bool chordOnly = params[SNAP_PARAM].getValue() > 0.5f && chord;
         const int key = 60 + (int) std::lround (inputs[VOCT_INPUT].getVoltage() * 12.f);
         const int lead = snap (key, chordOnly ? chord : scale);
-        int out[4];
-        const int n = voices (lead, (int) params[HARM_PARAM].getValue(), chord, scale, out);
+        const int slot = (int) params[COLOR_PARAM].getValue();
+        const int color = slot ? COLOR_SETS[(int) params[SET_PARAM].getValue()][slot - 1] : C_OFF;
+        int out[6];
+        const int n = color ? colorVoices (lead, color, chord, scale, (int) params[KEY_PARAM].getValue(), out)
+                            : voices (lead, (int) params[HARM_PARAM].getValue(), chord, scale, out);
 
         const float tau = 0.5f * params[GLIDE_PARAM].getValue();
         const float k = tau > 0.f ? 1.f - std::exp (-a.sampleTime / tau) : 1.f;
@@ -119,7 +131,10 @@ struct HarmonyDisplay : Widget
         nvgFillColor (vg, nvgRGB (0xc8, 0xff, 0x3a)); nvgFontSize (vg, 18.f);
         nvgText (vg, x + 34.f, -1.f, chordName (m ? m->shownChord : 0).c_str(), nullptr);
         nvgFillColor (vg, nvgRGB (0xf2, 0xf2, 0xf4)); nvgFontSize (vg, 9.f);
-        nvgText (vg, x, 18.f, HARMONY_NAMES[h], nullptr);
+        const int slot = m ? (int) m->params[Harmony::COLOR_PARAM].getValue() : 0;
+        const int set = m ? (int) m->params[Harmony::SET_PARAM].getValue() : 0;
+        const std::string mode = slot ? std::string (SET_NAMES[set]) + ": " + COLOR_NAMES[COLOR_SETS[set][slot - 1]] : HARMONY_NAMES[h];
+        nvgText (vg, x, 18.f, mode.c_str(), nullptr);
         nvgText (vg, x, 45.f, scale.c_str(), nullptr);
         nvgText (vg, x, 69.f, notes.c_str(), nullptr);
         nvgFillColor (vg, nvgRGB (0x5a, 0xc8, 0xe6));
@@ -144,11 +159,15 @@ struct HarmonyWidget : ModuleWidget
         knob (L::MODE_PARAM, Harmony::MODE_PARAM);
         knob (L::HARM_PARAM, Harmony::HARM_PARAM);
         knob (L::GLIDE_PARAM, Harmony::GLIDE_PARAM);
+        knob (L::COLOR_PARAM, Harmony::COLOR_PARAM);
+        knob (L::SET_PARAM, Harmony::SET_PARAM);
         addParam (createLightParamCentered<VCVLightLatch<MediumSimpleLight<LimeLight>>> (at (L::SNAP_PARAM), module, Harmony::SNAP_PARAM, Harmony::SNAP_LIGHT));
         addInput (createInputCentered<PJ301MPort> (at (L::VOCT_INPUT), module, Harmony::VOCT_INPUT));
         addInput (createInputCentered<PJ301MPort> (at (L::GATE_INPUT), module, Harmony::GATE_INPUT));
         addInput (createInputCentered<PJ301MPort> (at (L::CHORD_INPUT), module, Harmony::CHORD_INPUT));
         addInput (createInputCentered<PJ301MPort> (at (L::CHGATE_INPUT), module, Harmony::CHGATE_INPUT));
+        addInput (createInputCentered<PJ301MPort> (at (L::PADS_INPUT), module, Harmony::PADS_INPUT));
+        addInput (createInputCentered<PJ301MPort> (at (L::PADGATE_INPUT), module, Harmony::PADGATE_INPUT));
         addOutput (createOutputCentered<PJ301MPort> (at (L::VOCT_OUTPUT), module, Harmony::VOCT_OUTPUT));
         addOutput (createOutputCentered<PJ301MPort> (at (L::GATE_OUTPUT), module, Harmony::GATE_OUTPUT));
         HarmonyDisplay* d = createWidget<HarmonyDisplay> (mm2px (Vec (L::DISPLAY_BOX[0], L::DISPLAY_BOX[1])));
