@@ -105,7 +105,19 @@ ROLL = dict(name='roll', svg='Roll.svg', title='MY LIL ROLL', w=ROLL_W, captions
     ('VEL_OUTPUT', 'out', 202, RJ, 'VEL'), ('EOC_OUTPUT', 'out', 218, RJ, 'EOC'),
 ], boxes=[('STRIP_BOX', 4.0, 10.2, ROLL_W - 8, 6.6), ('ROLL_BOX', 4.0, 17.6, ROLL_W - 8, 75.4), ('VEL_BOX', 4.0, 94.0, ROLL_W - 8, 10.0)])
 
-PANELS = (TRIPLE, ROLL)
+# ---- My lil Harmony: 16 HP. Knobs on top, the chord display, jacks in the block below.
+HARM_W = 5.08 * 16
+HX = [14.0, 31.0, 48.0, 65.0]
+HARMONY = dict(name='harmony', svg='Harmony.svg', title='MY LIL HARMONY', w=HARM_W, block=(86, 40), layout=[
+    ('KEY_PARAM', 'knob', HX[0], 28, 'KEY'), ('MODE_PARAM', 'knob', HX[1], 28, 'MODE'),
+    ('HARM_PARAM', 'knob', HX[2], 28, 'HARMONY'), ('GLIDE_PARAM', 'knob', HX[3], 28, 'GLIDE'),
+    ('SNAP_PARAM', 'button', HX[0], 50, 'CHORD ONLY'),
+    ('VOCT_INPUT', 'play', HX[0], 96, 'V/OCT'), ('GATE_INPUT', 'play', HX[1], 96, 'GATE'),
+    ('CHORD_INPUT', 'seq', HX[2], 96, 'CHORD'), ('CHGATE_INPUT', 'seq', HX[3], 96, 'CH GATE'),
+    ('VOCT_OUTPUT', 'out', HX[2], 115, 'V/OCT'), ('GATE_OUTPUT', 'out', HX[3], 115, 'GATE'),
+], captions=[('LEAD IN', HX[0], 96), ('ROLL IN', HX[2], 96)], boxes=[('DISPLAY_BOX', 24.0, 44.0, HARM_W - 28, 34.0)])
+
+PANELS = (TRIPLE, ROLL, HARMONY)
 
 
 def reach(kind):

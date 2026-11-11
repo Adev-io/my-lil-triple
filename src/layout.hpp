@@ -43,4 +43,18 @@ constexpr float STRIP_BOX[4] = {4.00f, 10.20f, 235.84f, 6.60f};   // x, y, w, h
 constexpr float ROLL_BOX[4] = {4.00f, 17.60f, 235.84f, 75.40f};   // x, y, w, h
 constexpr float VEL_BOX[4] = {4.00f, 94.00f, 235.84f, 10.00f};   // x, y, w, h
 }
+namespace harmony {
+constexpr float KEY_PARAM[2] = {14.00f, 28.00f};
+constexpr float MODE_PARAM[2] = {31.00f, 28.00f};
+constexpr float HARM_PARAM[2] = {48.00f, 28.00f};
+constexpr float GLIDE_PARAM[2] = {65.00f, 28.00f};
+constexpr float SNAP_PARAM[2] = {14.00f, 50.00f};
+constexpr float VOCT_INPUT[2] = {14.00f, 96.00f};
+constexpr float GATE_INPUT[2] = {31.00f, 96.00f};
+constexpr float CHORD_INPUT[2] = {48.00f, 96.00f};
+constexpr float CHGATE_INPUT[2] = {65.00f, 96.00f};
+constexpr float VOCT_OUTPUT[2] = {48.00f, 115.00f};
+constexpr float GATE_OUTPUT[2] = {65.00f, 115.00f};
+constexpr float DISPLAY_BOX[4] = {24.00f, 44.00f, 53.28f, 34.00f};   // x, y, w, h
+}
 }

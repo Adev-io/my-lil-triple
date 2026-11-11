@@ -3,6 +3,7 @@
 #include "check.h"
 #include "test_adsr.h"
 #include "test_chords.h"
+#include "test_harmony.h"
 #include "test_roll.h"
 #include "test_osc.h"
 #include "test_svf.h"
@@ -13,6 +14,7 @@ int main()
 {
     testAdsr();
     testChords();
+    testHarmony();
     testRollData();
     testRollClock();
     testRollPlayer();
