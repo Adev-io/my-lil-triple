@@ -150,4 +150,18 @@ inline void testVoice()
         }
     }
     check (finite && worst < 200.0, "16 harsh voices stay finite and bounded", worst);
+    // velocity scales the level (a docked My lil Roll sends it)
+    {
+        TripleCfg vc = sineCfg();
+        TripleVoice full, half;
+        double pf = 0, ph = 0;
+        for (int i = 0; i < 24000; ++i)
+        {
+            full.process (vc, 0.f, true, 0.f, 48000.f, a, b);
+            pf = std::max<double> (pf, std::fabs (a));
+            half.process (vc, 0.f, true, 0.f, 48000.f, a, b, 0.5f);
+            ph = std::max<double> (ph, std::fabs (a));
+        }
+        check (near (ph / pf, 0.5, 1e-3), "velocity 0.5 halves the level", ph / pf);
+    }
 }

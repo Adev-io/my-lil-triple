@@ -5,6 +5,7 @@
 #include "FaceTap.h"
 #include "TripleVoice.h"
 #include "WaveTable.h"
+#include "Dock.hpp"
 #include <atomic>
 
 enum OscParam { O_WAVE, O_INV, O_PHASE, O_COARSE, O_FINE, O_PAN, O_MIX, O_N };
@@ -31,6 +32,7 @@ struct Triple : Module
     std::string tablePath;                                    // UI thread only; saved in the patch
     FaceTap face;
     int tick = 0;
+    DockMsg dock[2];   // left expander buffers: a My lil Roll on our left writes notes here
 
     Triple()
     {
@@ -63,11 +65,13 @@ struct Triple : Module
         configParam (F_DEC_PARAM, 0.001f, 4.f, 0.3f, "Filter decay", " ms", 0.f, 1000.f);
         configParam (F_SUS_PARAM, 0.f, 1.f, 0.5f, "Filter sustain", "%", 0.f, 100.f);
         configParam (F_REL_PARAM, 0.001f, 4.f, 0.2f, "Filter release", " ms", 0.f, 1000.f);
-        configInput (VOCT_INPUT, "V/OCT (poly)");
-        configInput (GATE_INPUT, "Gate (poly)");
+        configInput (VOCT_INPUT, "V/OCT (poly; ignored while a My lil Roll is docked on the left)");
+        configInput (GATE_INPUT, "Gate (poly; ignored while a My lil Roll is docked on the left)");
         configInput (CUTCV_INPUT, "Cutoff CV (1 V/oct, poly)");
         configOutput (OUT_L_OUTPUT, "Left (poly)");
         configOutput (OUT_R_OUTPUT, "Right (poly)");
+        leftExpander.producerMessage = &dock[0];
+        leftExpander.consumerMessage = &dock[1];
         refresh();
     }
 
@@ -136,15 +140,18 @@ struct Triple : Module
         }
         if ((tick++ & 15) == 0) refresh();   // knobs are read every 16 samples, not every sample
 
-        const int n = std::max (inputs[VOCT_INPUT].getChannels(), inputs[GATE_INPUT].getChannels());
+        // a My lil Roll docked on the left replaces the V/OCT and gate jacks and adds velocity
+        const DockMsg* d = (leftExpander.module && leftExpander.module->model == modelRoll) ? (const DockMsg*) leftExpander.consumerMessage : nullptr;
+        const int n = d ? std::min (d->channels, 16) : std::max (inputs[VOCT_INPUT].getChannels(), inputs[GATE_INPUT].getChannels());
         outputs[OUT_L_OUTPUT].setChannels (n);
         outputs[OUT_R_OUTPUT].setChannels (n);
         float sum = 0.f;
         for (int c = 0; c < n; ++c)
         {
             float l, r;
-            voice[c].process (cfg, inputs[VOCT_INPUT].getPolyVoltage (c), inputs[GATE_INPUT].getPolyVoltage (c) >= 1.f,
-                              inputs[CUTCV_INPUT].getPolyVoltage (c), a.sampleRate, l, r);
+            const float voct = d ? d->voct[c] : inputs[VOCT_INPUT].getPolyVoltage (c);
+            const bool gate = d ? d->gate[c] >= 1.f : inputs[GATE_INPUT].getPolyVoltage (c) >= 1.f;
+            voice[c].process (cfg, voct, gate, inputs[CUTCV_INPUT].getPolyVoltage (c), a.sampleRate, l, r, d ? d->vel[c] : 1.f);
             outputs[OUT_L_OUTPUT].setVoltage (5.f * l, c);
             outputs[OUT_R_OUTPUT].setVoltage (5.f * r, c);
             sum += l;

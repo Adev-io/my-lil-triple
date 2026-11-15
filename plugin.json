@@ -1,7 +1,7 @@
 {
   "slug": "MyLilTriple",
   "name": "My lil Triple",
-  "version": "2.0.0",
+  "version": "2.3.0",
   "license": "MIT",
   "brand": "A_Development",
   "author": "Ari Klopfer",
@@ -13,6 +13,8 @@
   "donateUrl": "",
   "changelogUrl": "https://github.com/Adev-io/my-lil-triple/releases",
   "modules": [
-    { "slug": "Triple", "name": "My lil Triple", "description": "Polyphonic three-oscillator synth voice: seven waves per osc, AM, HQ, amp ADSR, filter with its own ADSR", "tags": ["Oscillator", "Synth voice", "Polyphonic"] }
+    { "slug": "Triple", "name": "My lil Triple", "description": "Polyphonic three-oscillator synth voice: seven waves per osc, AM, HQ, amp ADSR, filter with its own ADSR", "tags": ["Oscillator", "Synth voice", "Polyphonic"] },
+    { "slug": "Roll", "name": "My lil Roll", "description": "Piano roll sequencer: draw notes and one-click chords, scale snap, velocity; poly V/OCT, gate, velocity out; docks onto My lil Triple", "tags": ["Sequencer", "Polyphonic"] },
+    { "slug": "Harmony", "name": "My lil Harmony", "description": "Lead quantizer and harmonizer that follows the chords of a My lil Roll: chord-aware scale, 8 harmony modes, glide; poly V/OCT and gate out", "tags": ["Quantizer", "Polyphonic"] }
   ]
 }

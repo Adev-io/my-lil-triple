@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""panel.py: writes res/Triple.svg and src/layout.hpp from one layout table.
+"""panel.py: writes res/Triple.svg, res/Roll.svg and src/layout.hpp from one layout table per panel.
 
 Labels become paths (DejaVu Sans from the Rack install, or the font named by RACK_FONT), so the SVG has no <text>.
 The widgets read the same table through layout.hpp, so art and components cannot drift.
@@ -13,7 +13,6 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 
 H = 128.5
-W = 5.08 * 40
 BAND = 8.6
 INK, INK2 = '#16161a', '#202027'
 LIME, MAGENTA, BLUE, WHITE, DIM = '#c8ff3a', '#ff3d9a', '#5ac8e6', '#f2f2f4', '#8d8d96'
@@ -50,8 +49,7 @@ def text(s, x, y, size, fill, anchor='middle', stroke=0.0):
     return '<path fill="%s"%s d="%s"/>' % (fill, bold, ' '.join(d))
 
 
-TITLE, TITLE_X, TITLE_Y, TITLE_SIZE = 'MY LIL TRIPLE', 11.2, 6.3, 4.3
-MASCOT_X = W - 14.46
+TITLE_X, TITLE_Y, TITLE_SIZE = 11.2, 6.3, 4.3
 MASCOT_R = BAND * 0.36
 
 
@@ -66,7 +64,7 @@ def mascot(cx, cy, r):
     ])
 
 
-# ---- components: (name, kind, x, y, label). Twelve columns, three rows, jacks below.
+# ---- My lil Triple: (name, kind, x, y, label). Twelve columns, three rows, jacks below.
 CX = [14.0 + 16.0 * i for i in range(12)]
 ROW_A, ROW_B, ROW_C, JACK_Y = 26.0, 50.0, 74.0, 108.0
 OSC_ROWS = [ROW_A, ROW_B, ROW_C]
@@ -93,6 +91,35 @@ LAYOUT += [
 ]
 CAPTIONS = [('OSC 1', CX[0], ROW_A), ('OSC 2', CX[0], ROW_B), ('OSC 3', CX[0], ROW_C),
             ('AMP ENV', CX[8], ROW_A), ('FILTER', CX[8], ROW_B), ('FILTER ENV', CX[8], ROW_C)]
+TRIPLE = dict(name='triple', svg='Triple.svg', title='MY LIL TRIPLE', w=5.08 * 40, layout=LAYOUT, captions=CAPTIONS,
+              block=(94, 32), boxes=[])
+
+# ---- My lil Roll: 48 HP. Tool strip, note grid and velocity lane are drawn by the widget inside these boxes.
+ROLL_W = 5.08 * 48
+RJ = 114.0
+ROLL = dict(name='roll', svg='Roll.svg', title='MY LIL ROLL', w=ROLL_W, captions=[], block=(106, 20), layout=[
+    ('CLK_INPUT', 'seq', 14, RJ, 'CLK'), ('RST_INPUT', 'seq', 28, RJ, 'RST'), ('RUN_INPUT', 'seq', 42, RJ, 'RUN'),
+    ('RST_PARAM', 'button', 55, RJ, 'RESET'), ('RUN_PARAM', 'button', 67, RJ, 'PLAY'), ('BPM_PARAM', 'knob', 83, RJ, 'BPM'),
+    ('PAT_PARAM', 'knob', 101, RJ, 'PAT'), ('ARP_PARAM', 'knob', 119, RJ, 'ARP'), ('PAT_INPUT', 'cv', 137, RJ, 'PAT CV'),
+    ('VOCT_OUTPUT', 'out', 170, RJ, 'V/OCT'), ('GATE_OUTPUT', 'out', 186, RJ, 'GATE'),
+    ('VEL_OUTPUT', 'out', 202, RJ, 'VEL'), ('EOC_OUTPUT', 'out', 218, RJ, 'EOC'),
+], boxes=[('STRIP_BOX', 4.0, 10.2, ROLL_W - 8, 6.6), ('ROLL_BOX', 4.0, 17.6, ROLL_W - 8, 75.4), ('VEL_BOX', 4.0, 94.0, ROLL_W - 8, 10.0)])
+
+# ---- My lil Harmony: 16 HP. Knobs on top, the chord display, jacks in the block below.
+HARM_W = 5.08 * 16
+HX = [14.0, 31.0, 48.0, 65.0]
+HARMONY = dict(name='harmony', svg='Harmony.svg', title='MY LIL HARMONY', w=HARM_W, block=(86, 40), layout=[
+    ('KEY_PARAM', 'knob', HX[0], 28, 'KEY'), ('MODE_PARAM', 'knob', HX[1], 28, 'MODE'),
+    ('HARM_PARAM', 'knob', HX[2], 28, 'HARMONY'), ('GLIDE_PARAM', 'knob', HX[3], 28, 'GLIDE'),
+    ('COLOR_PARAM', 'knob', HX[0], 50, 'COLOR'), ('SET_PARAM', 'knob', HX[0], 70, 'SET'),
+    ('SNAP_PARAM', 'button', HX[0], 84, 'CHORD ONLY'),
+    ('VOCT_INPUT', 'play', HX[0], 96, 'V/OCT'), ('GATE_INPUT', 'play', HX[1], 96, 'GATE'),
+    ('CHORD_INPUT', 'seq', HX[2], 96, 'CHORD'), ('CHGATE_INPUT', 'seq', HX[3], 96, 'CH GATE'),
+    ('PADS_INPUT', 'cv', HX[0], 115, 'PADS'), ('PADGATE_INPUT', 'cv', HX[1], 115, 'PAD GATE'),
+    ('VOCT_OUTPUT', 'out', HX[2], 115, 'V/OCT'), ('GATE_OUTPUT', 'out', HX[3], 115, 'GATE'),
+], captions=[('LEAD IN', HX[0], 96), ('ROLL IN', HX[2], 96), ('PADS IN', HX[0], 115)], boxes=[('DISPLAY_BOX', 24.0, 44.0, HARM_W - 28, 34.0)])
+
+PANELS = (TRIPLE, ROLL, HARMONY)
 
 
 def reach(kind):
@@ -103,10 +130,11 @@ def label_base(kind, y):
     return y + reach(kind) + (2.6 if kind != 'knob' else 3.2)
 
 
-def problems():
+def problems(p):
     """Parts must not overlap each other, their labels, the band, the screws or the panel edge. Must be empty."""
+    W, layout = p['w'], p['layout']
     bad = []
-    parts = [(n, x, y, reach(k)) for n, k, x, y, _ in LAYOUT]
+    parts = [(n, x, y, reach(k)) for n, k, x, y, _ in layout]
     for j, (a, ax, ay, ar) in enumerate(parts):
         if ax - ar < 0 or ax + ar > W or ay - ar < BAND or ay + ar > H:
             bad.append('%s leaves the panel or enters the band' % a)
@@ -117,7 +145,7 @@ def problems():
             for sy in (0.0, H - 5.08):
                 if sx < ax + ar and ax - ar < sx + 5.08 and sy < ay + ar and ay - ar < sy + 5.08:
                     bad.append('%s under a screw' % a)
-    for n, k, x, y, lab in LAYOUT:   # a label must clear every other part
+    for n, k, x, y, lab in layout:   # a label must clear every other part
         w, base, size = width(lab, LABEL_SIZE[k]), label_base(k, y), LABEL_SIZE[k]
         box = (x - w / 2, base - 0.73 * size, x + w / 2, base)
         for m, mx, my, mr in parts:
@@ -127,21 +155,28 @@ def problems():
                     bad.append('%s label covers %s' % (n, m))
         if box[2] > W or box[3] > H:
             bad.append('%s label leaves the panel' % n)
+    for name, x, y, bw, bh in p['boxes']:
+        for n, bx, by, br in parts:
+            if x - br < bx < x + bw + br and y - br < by < y + bh + br:
+                bad.append('%s sits on %s' % (n, name))
     return bad
 
 
-def panel():
+def panel(p):
+    W = p['w']
     out = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<svg xmlns="http://www.w3.org/2000/svg" width="%gmm" height="%gmm" viewBox="0 0 %g %g">' % (W, H, W, H),
         '<rect width="%g" height="%g" fill="%s"/>' % (W, H, INK),
         '<rect width="%g" height="%g" fill="%s"/>' % (W, BAND, LIME),
-        text(TITLE, TITLE_X, TITLE_Y, TITLE_SIZE, INK, 'start', 0.39), mascot(MASCOT_X, BAND / 2, MASCOT_R),
-        '<rect x="2.5" y="94" width="%g" height="32" rx="2" fill="%s"/>' % (W - 5, INK2),
+        text(p['title'], TITLE_X, TITLE_Y, TITLE_SIZE, INK, 'start', 0.39), mascot(W - 14.46, BAND / 2, MASCOT_R),
+        '<rect x="2.5" y="%g" width="%g" height="%g" rx="2" fill="%s"/>' % (p['block'][0], W - 5, p['block'][1], INK2),
     ]
-    for cap, x, y in CAPTIONS:
+    for _, x, y, bw, bh in p['boxes']:
+        out.append('<rect x="%g" y="%g" width="%g" height="%g" rx="1" fill="%s"/>' % (x, y, bw, bh, INK2))
+    for cap, x, y in p['captions']:
         out.append(text(cap, x - RADIUS['knob'], y - RADIUS['knob'] - 1.7, 2.2, DIM, 'start'))
-    for _, kind, x, y, label in LAYOUT:
+    for _, kind, x, y, label in p['layout']:
         if kind in RING_COLOR:
             out.append('<circle cx="%g" cy="%g" r="%g" fill="none" stroke="%s" stroke-width="0.5"/>' % (x, y, RING_R, RING_COLOR[kind]))
         elif kind == 'out':
@@ -153,27 +188,35 @@ def panel():
     return '\n'.join(out) + '\n'
 
 
-def header():
-    pos = {n: (x, y) for n, k, x, y, _ in LAYOUT}
-    osc = []
-    for o in range(3):
-        row = [pos.get('OSC%d_%d' % (o, j), (0.0, 0.0)) for j in range(len(OSC_PARTS))]   # osc 1's MIX stays at 0,0 and is skipped
-        osc.append('{%s}' % ', '.join('{%.2ff, %.2ff}' % p for p in row))
-    lines = ['// layout.hpp: generated by tools/panel.py, do not edit. Component centres in mm.', '#pragma once',
-             'namespace layout {', 'namespace triple {',
-             'constexpr float OSC[3][%d][2] = {%s};   // wave, invert, phase, coarse, fine, pan, mix' % (len(OSC_PARTS), ', '.join(osc))]
-    lines += ['constexpr float %s[2] = {%.2ff, %.2ff};' % (n, x, y) for n, k, x, y, _ in LAYOUT if not n.startswith('OSC')]
-    lines += ['constexpr float FACE[3] = {%.2ff, %.2ff, %.3ff};   // mascot centre x, y, radius (TalkingFace)' % (MASCOT_X, BAND / 2, MASCOT_R)]
-    lines += ['}', '}', '']
+def header(panels):
+    lines = ['// layout.hpp: generated by tools/panel.py, do not edit. Component centres in mm.', '#pragma once', 'namespace layout {']
+    for p in panels:
+        lines.append('namespace %s {' % p['name'])
+        if p['name'] == 'triple':
+            pos = {n: (x, y) for n, k, x, y, _ in p['layout']}
+            osc = []
+            for o in range(3):
+                row = [pos.get('OSC%d_%d' % (o, j), (0.0, 0.0)) for j in range(len(OSC_PARTS))]   # osc 1's MIX stays at 0,0 and is skipped
+                osc.append('{%s}' % ', '.join('{%.2ff, %.2ff}' % q for q in row))
+            lines.append('constexpr float OSC[3][%d][2] = {%s};   // wave, invert, phase, coarse, fine, pan, mix' % (len(OSC_PARTS), ', '.join(osc)))
+        lines += ['constexpr float %s[2] = {%.2ff, %.2ff};' % (n, x, y) for n, k, x, y, _ in p['layout'] if not n.startswith('OSC')]
+        lines += ['constexpr float %s[4] = {%.2ff, %.2ff, %.2ff, %.2ff};   // x, y, w, h' % b for b in p['boxes']]
+        if p['name'] == 'triple':
+            lines.append('constexpr float FACE[3] = {%.2ff, %.2ff, %.3ff};   // mascot centre x, y, radius (TalkingFace)' % (p['w'] - 14.46, BAND / 2, MASCOT_R))
+        lines.append('}')
+    lines += ['}', '']
     return '\n'.join(lines)
 
 
 if __name__ == '__main__':
-    bad = problems()
-    assert not bad, '; '.join(bad)
-    files = {os.path.join('res', 'Triple.svg'): panel(), os.path.join('src', 'layout.hpp'): header()}
+    files = {}
+    for p in PANELS:
+        bad = problems(p)
+        assert not bad, '; '.join(bad)
+        files[os.path.join('res', p['svg'])] = panel(p)
+    files[os.path.join('src', 'layout.hpp')] = header(PANELS)
     for rel, body in files.items():
         os.makedirs(os.path.dirname(os.path.join(ROOT, rel)), exist_ok=True)
         with open(os.path.join(ROOT, rel), 'w', encoding='utf-8') as f:
             f.write(body)
-    print('wrote', ', '.join(files), '(%d components)' % len(LAYOUT))
+    print('wrote', ', '.join(files), '(%d components)' % sum(len(p['layout']) for p in PANELS))

@@ -25,4 +25,40 @@ constexpr float OUT_L_OUTPUT[2] = {174.00f, 108.00f};
 constexpr float OUT_R_OUTPUT[2] = {190.00f, 108.00f};
 constexpr float FACE[3] = {188.74f, 4.30f, 3.096f};   // mascot centre x, y, radius (TalkingFace)
 }
+namespace roll {
+constexpr float CLK_INPUT[2] = {14.00f, 114.00f};
+constexpr float RST_INPUT[2] = {28.00f, 114.00f};
+constexpr float RUN_INPUT[2] = {42.00f, 114.00f};
+constexpr float RST_PARAM[2] = {55.00f, 114.00f};
+constexpr float RUN_PARAM[2] = {67.00f, 114.00f};
+constexpr float BPM_PARAM[2] = {83.00f, 114.00f};
+constexpr float PAT_PARAM[2] = {101.00f, 114.00f};
+constexpr float ARP_PARAM[2] = {119.00f, 114.00f};
+constexpr float PAT_INPUT[2] = {137.00f, 114.00f};
+constexpr float VOCT_OUTPUT[2] = {170.00f, 114.00f};
+constexpr float GATE_OUTPUT[2] = {186.00f, 114.00f};
+constexpr float VEL_OUTPUT[2] = {202.00f, 114.00f};
+constexpr float EOC_OUTPUT[2] = {218.00f, 114.00f};
+constexpr float STRIP_BOX[4] = {4.00f, 10.20f, 235.84f, 6.60f};   // x, y, w, h
+constexpr float ROLL_BOX[4] = {4.00f, 17.60f, 235.84f, 75.40f};   // x, y, w, h
+constexpr float VEL_BOX[4] = {4.00f, 94.00f, 235.84f, 10.00f};   // x, y, w, h
+}
+namespace harmony {
+constexpr float KEY_PARAM[2] = {14.00f, 28.00f};
+constexpr float MODE_PARAM[2] = {31.00f, 28.00f};
+constexpr float HARM_PARAM[2] = {48.00f, 28.00f};
+constexpr float GLIDE_PARAM[2] = {65.00f, 28.00f};
+constexpr float COLOR_PARAM[2] = {14.00f, 50.00f};
+constexpr float SET_PARAM[2] = {14.00f, 70.00f};
+constexpr float SNAP_PARAM[2] = {14.00f, 84.00f};
+constexpr float VOCT_INPUT[2] = {14.00f, 96.00f};
+constexpr float GATE_INPUT[2] = {31.00f, 96.00f};
+constexpr float CHORD_INPUT[2] = {48.00f, 96.00f};
+constexpr float CHGATE_INPUT[2] = {65.00f, 96.00f};
+constexpr float PADS_INPUT[2] = {14.00f, 115.00f};
+constexpr float PADGATE_INPUT[2] = {31.00f, 115.00f};
+constexpr float VOCT_OUTPUT[2] = {48.00f, 115.00f};
+constexpr float GATE_OUTPUT[2] = {65.00f, 115.00f};
+constexpr float DISPLAY_BOX[4] = {24.00f, 44.00f, 53.28f, 34.00f};   // x, y, w, h
+}
 }
